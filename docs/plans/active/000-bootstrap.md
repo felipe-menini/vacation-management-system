@@ -1,6 +1,7 @@
 # Bootstrap Implementation Plan
 
-This plan describes future bootstrap work only. It intentionally does not create React, .NET, Docker, database, or application code yet.
+This plan tracks EP-00 bootstrap implementation. It establishes the production-oriented
+walking skeleton only; leave-management business functionality remains out of scope.
 
 ## Source documents
 
@@ -17,29 +18,30 @@ This plan describes future bootstrap work only. It intentionally does not create
 - [Leave policies](../../product/leave-policies.md)
 - [Workflows](../../product/workflows.md)
 
-## Future bootstrap goals
+## Bootstrap goals
 
-- Establish the modular monolith backend skeleton.
-- Establish the React + TypeScript frontend skeleton.
-- Configure Entra ID authentication through a BFF session model.
-- Prepare PostgreSQL persistence and migration strategy.
-- Prepare private attachment storage boundaries.
-- Add test infrastructure for business rules, authorization, and PostgreSQL integration tests.
-- Add CI checks for linting, tests, security scanning, and container builds.
+- [x] Establish the modular monolith backend skeleton.
+- [x] Establish the React + TypeScript frontend skeleton.
+- [ ] Configure Entra ID authentication through a BFF session model.
+- [x] Prepare PostgreSQL persistence and migration strategy.
+- [ ] Prepare private attachment storage boundaries.
+- [x] Add initial backend unit test projects.
+- [x] Add an API integration/smoke test for application startup and `/health`.
+- [x] Add CI checks for backend restore/build/test and frontend lint/typecheck/build.
 
-## Planned implementation slices
+## Implemented EP-00 slices
 
-1. Repository structure and solution skeleton.
-2. Backend module boundaries and shared-kernel conventions.
-3. Authentication/BFF foundation with Entra ID configuration placeholders.
-4. Authorization foundation for Role + Organizational Scope.
-5. PostgreSQL persistence setup and migration conventions.
-6. Policy and balance domain test harness.
-7. Attachment storage abstraction with private-access contract.
-8. Microsoft Graph integration abstraction for SharePoint migration.
-9. Transactional outbox and background worker foundation.
-10. Minimal responsive frontend shell and authenticated user context.
-11. CI/CD pipeline and local developer workflow documentation.
+1. Created `src/backend/Licenses.slnx` with API, Application, Domain, Infrastructure, and Worker projects.
+2. Wired project references so Domain stays independent from Infrastructure, ASP.NET Core, EF Core, PostgreSQL, Microsoft Graph, Azure, HTTP, and React.
+3. Added `ApplicationDbContext` in Infrastructure with PostgreSQL provider registration and no business/domain tables.
+4. Added ASP.NET Core health endpoints:
+   - `GET /health` for API liveness.
+   - `GET /health/ready` for PostgreSQL readiness.
+5. Created a .NET Worker service that starts and logs that it is running.
+6. Created `src/frontend/licenses-web` with React, TypeScript, Vite, lint, typecheck, and production build scripts.
+7. Implemented a responsive frontend page that calls backend health endpoints through `/api`.
+8. Added Dockerfiles for API, Worker, and Frontend plus root `docker-compose.yml`.
+9. Added root README developer instructions and GitHub Actions CI.
 
 ## Guardrails
 
@@ -51,6 +53,14 @@ This plan describes future bootstrap work only. It intentionally does not create
 - Do not directly edit calculated balances.
 - Do not grant technical administrators medical-document access by default.
 - Do not introduce frameworks or patterns without documenting the reason.
+
+## EP-00 non-goals confirmed
+
+- No leave requests were implemented.
+- No users, roles, organizational scopes, or authorization policies were implemented.
+- No policy or balance entities were implemented.
+- No Microsoft Entra ID, Microsoft Graph, or SharePoint integration was implemented.
+- No real secrets were committed.
 
 ## Open Decisions before implementation
 

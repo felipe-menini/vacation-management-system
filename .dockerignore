@@ -1,0 +1,13 @@
+.git
+.env
+.env.*
+!.env.example
+**/bin
+**/obj
+**/node_modules
+**/dist
+**/build
+**/coverage
+**/TestResults
+logs
+*.log

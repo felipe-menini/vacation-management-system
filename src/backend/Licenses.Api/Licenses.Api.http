@@ -1,0 +1,11 @@
+@Licenses.Api_HostAddress = http://localhost:5080
+
+GET {{Licenses.Api_HostAddress}}/health
+Accept: application/json
+
+###
+
+GET {{Licenses.Api_HostAddress}}/health/ready
+Accept: application/json
+
+###
