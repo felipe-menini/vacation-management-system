@@ -10,6 +10,20 @@ jobs:
   backend:
     name: Backend
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: licenses
+          POSTGRES_USER: licenses
+          POSTGRES_PASSWORD: change-me
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U licenses -d licenses"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Checkout
@@ -27,6 +41,12 @@ jobs:
         run: dotnet build src/backend/Licenses.slnx --configuration Release --no-restore
 
       - name: Test
+        env:
+          LICENSES_TEST_POSTGRES_HOST: localhost
+          LICENSES_TEST_POSTGRES_PORT: 5432
+          LICENSES_TEST_POSTGRES_ADMIN_DATABASE: postgres
+          LICENSES_TEST_POSTGRES_USERNAME: licenses
+          LICENSES_TEST_POSTGRES_PASSWORD: change-me
         run: dotnet test src/backend/Licenses.slnx --configuration Release --no-build
 
   frontend:

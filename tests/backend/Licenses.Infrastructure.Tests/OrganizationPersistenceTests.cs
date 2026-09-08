@@ -12,10 +12,8 @@ public sealed class OrganizationPersistenceTests
     public async Task PersistsOrganizationModelAgainstPostgreSql()
     {
         var databaseName = "licenses_test_" + Guid.NewGuid().ToString("N");
-        var adminConnection = Environment.GetEnvironmentVariable("LICENSES_TEST_POSTGRES_ADMIN")
-            ?? "Host=localhost;Port=5432;Database=postgres;Username=licenses;Password=change-me";
-        var testConnection = Environment.GetEnvironmentVariable("LICENSES_TEST_POSTGRES")
-            ?? $"Host=localhost;Port=5432;Database={databaseName};Username=licenses;Password=change-me";
+        var adminConnection = BuildConnectionString(Environment.GetEnvironmentVariable("LICENSES_TEST_POSTGRES_ADMIN_DATABASE") ?? "postgres");
+        var testConnection = BuildConnectionString(databaseName);
 
         await using var admin = new NpgsqlConnection(adminConnection);
         await admin.OpenAsync();
@@ -54,5 +52,19 @@ public sealed class OrganizationPersistenceTests
             drop.CommandText = $"DROP DATABASE IF EXISTS \"{databaseName}\" WITH (FORCE)";
             await drop.ExecuteNonQueryAsync();
         }
+    }
+
+    private static string BuildConnectionString(string databaseName)
+    {
+        var builder = new NpgsqlConnectionStringBuilder
+        {
+            Host = Environment.GetEnvironmentVariable("LICENSES_TEST_POSTGRES_HOST") ?? "localhost",
+            Port = int.Parse(Environment.GetEnvironmentVariable("LICENSES_TEST_POSTGRES_PORT") ?? "5432"),
+            Database = databaseName,
+            Username = Environment.GetEnvironmentVariable("LICENSES_TEST_POSTGRES_USERNAME") ?? "licenses",
+            Password = Environment.GetEnvironmentVariable("LICENSES_TEST_POSTGRES_PASSWORD") ?? "change-me"
+        };
+
+        return builder.ConnectionString;
     }
 }
