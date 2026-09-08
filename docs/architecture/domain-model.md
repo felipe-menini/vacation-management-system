@@ -1,0 +1,69 @@
+# Domain Model
+
+The domain model represents leave requests, organizational scope, configurable policy versions, immutable balance transactions, approvals, documents, audit, and migration traceability.
+
+## Aggregate map
+
+```mermaid
+erDiagram
+    User ||--o{ UserOrgAssignment : belongs_to
+    OrgUnit ||--o{ UserOrgAssignment : contains
+    OrgUnit ||--o{ OrgUnit : parent_of
+    User ||--o{ ScopeAssignment : has
+    Role ||--o{ ScopeAssignment : grants
+    OrgUnit ||--o{ ScopeAssignment : scopes
+    LeaveType ||--o{ LeavePolicyVersion : versioned_by
+    BalanceBucketType ||--o{ LeaveType : may_back
+    User ||--o{ LeaveRequest : requests
+    LeaveRequest ||--o{ LeaveRequestDay : may_detail
+    LeaveRequest ||--o{ ApprovalInstance : has
+    ApprovalInstance ||--o{ ApprovalStep : contains
+    ApprovalStep ||--o{ ApprovalDecision : records
+    User ||--o{ BalanceAccount : owns
+    BalanceBucketType ||--o{ BalanceAccount : classifies
+    BalanceAccount ||--o{ BalanceTransaction : records
+    LeaveRequest ||--o{ Attachment : has
+    LeaveRequest ||--o{ Comment : has
+```
+
+## Main entities
+
+| Entity | Responsibility |
+| --- | --- |
+| `User` | Local profile linked to Entra Object ID. It does not store corporate passwords. |
+| `OrgUnit` | Organizational tree using `parentId`. |
+| `UserOrgAssignment` | User membership in primary and optional secondary units. |
+| `Role` / `Permission` | RBAC catalog of functional capabilities. |
+| `ScopeAssignment` | User + role + root org unit + include-descendants flag. |
+| `LeaveType` | User-visible leave type; may consume a balance bucket. |
+| `BalanceBucketType` | Balance concept such as vacation, study leave, or medical exams. |
+| `LeavePolicyVersion` | Effective dated rule set for a leave type and optionally a unit. |
+| `HolidayCalendar` / `Holiday` | Assignable holiday calendars. |
+| `LeaveRequest` | Request with dates, AM/PM segments, calculated days, applied policy version, and state. |
+| `LeaveRequestDay` | Optional per-day detail for complex calculation and half-days. |
+| `ApprovalInstance` / `ApprovalStep` | Resolved workflow instance and approvers. |
+| `ApprovalDecision` | Immutable approval decision. |
+| `BalanceAccount` | User + bucket + period account. |
+| `BalanceTransaction` | Immutable ledger entry for grants, reserves, consumption, release, refund, adjustment, and expiry. |
+| `Comment` | Request comments with author and visibility. |
+| `Attachment` | Document metadata only; bytes live in private storage. |
+| `AuditEvent` | Security and business audit event. |
+| `NotificationOutbox` | Pending notification events for reliable delivery. |
+| `MigrationMapping` | Source SharePoint IDs mapped to internal IDs for traceability and reconciliation. |
+
+## Domain invariants
+
+- A leave request stores the policy version used for its calculation/approval.
+- Historical policy versions must not be modified after they have been applied.
+- A calculated balance is never directly edited.
+- Balance corrections happen through compensating ledger transactions.
+- Approval decisions are immutable evidence.
+- Attachment content is not stored in relational domain tables.
+- SharePoint column names and Graph structures never enter the domain model.
+
+## Related documents
+
+- [Database](database.md)
+- [Authorization](authorization.md)
+- [Leave policies](../product/leave-policies.md)
+- [Workflows](../product/workflows.md)
