@@ -2,6 +2,7 @@
   <Project Path="../../tests/backend/Licenses.Api.Tests/Licenses.Api.Tests.csproj" />
   <Project Path="../../tests/backend/Licenses.Application.Tests/Licenses.Application.Tests.csproj" />
   <Project Path="../../tests/backend/Licenses.Domain.Tests/Licenses.Domain.Tests.csproj" />
+  <Project Path="../../tests/backend/Licenses.Infrastructure.Tests/Licenses.Infrastructure.Tests.csproj" />
   <Project Path="Licenses.Api/Licenses.Api.csproj" />
   <Project Path="Licenses.Application/Licenses.Application.csproj" />
   <Project Path="Licenses.Domain/Licenses.Domain.csproj" />

@@ -1,4 +1,6 @@
+using Licenses.Application.Organization;
 using Licenses.Infrastructure.Health;
+using Licenses.Infrastructure.Organization;
 using Licenses.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -22,6 +24,9 @@ public static class DependencyInjection
                 options.UseNpgsql(connectionString);
             }
         });
+
+        services.AddScoped<IOrganizationRepository, EfOrganizationRepository>();
+        services.AddSingleton(TimeProvider.System);
 
         services.AddHealthChecks()
             .AddCheck<PostgreSqlHealthCheck>("postgresql", HealthStatus.Unhealthy, ["ready"]);

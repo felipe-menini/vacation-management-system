@@ -1,5 +1,8 @@
 using Licenses.Api.Health;
+using Licenses.Api.Organization;
+using Licenses.Application.Organization;
 using Licenses.Infrastructure;
+using Licenses.Infrastructure.Development;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -17,17 +20,32 @@ builder.Services.AddCors(options =>
 });
 builder.Services.AddHealthChecks();
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddScoped<OrganizationService>();
 
 var app = builder.Build();
+
+app.UseExceptionHandler(exceptionApp =>
+{
+    exceptionApp.Run(async context =>
+    {
+        var exception = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()?.Error;
+        context.Response.StatusCode = exception is InvalidOperationException or ArgumentException
+            ? StatusCodes.Status400BadRequest
+            : StatusCodes.Status500InternalServerError;
+        await context.Response.WriteAsJsonAsync(new { error = exception?.Message ?? "Unexpected error." });
+    });
+});
 
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
     app.UseCors("DevelopmentFrontend");
+    await DevelopmentOrganizationSeeder.SeedAsync(app);
 }
 
 app.MapHealthChecks("/health", HealthResponseWriter.ApiHealthOptions);
 app.MapHealthChecks("/health/ready", HealthResponseWriter.ReadinessHealthOptions);
+app.MapOrganizationEndpoints();
 
 app.Run();
 

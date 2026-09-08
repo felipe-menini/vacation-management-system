@@ -19,7 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\src\backend\Licenses.Application\Licenses.Application.csproj" />
+    <ProjectReference Include="..\..\..\src\backend\Licenses.Infrastructure\Licenses.Infrastructure.csproj" />
     <ProjectReference Include="..\..\..\src\backend\Licenses.Domain\Licenses.Domain.csproj" />
   </ItemGroup>
 
