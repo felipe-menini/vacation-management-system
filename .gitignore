@@ -1,0 +1,55 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# Node
+node_modules/
+dist/
+build/
+coverage/
+.npm/
+.pnpm-store/
+
+# IDE
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Test results
+TestResults/
+playwright-report/
+test-results/
+
+# Local databases / storage
+*.db
+*.sqlite
+.local/
+data/
+
+# Certificates / secrets
+*.pfx
+*.p12
+*.pem
+*.key
+
+# Temporary
+tmp/
+temp/
+*.tmp
