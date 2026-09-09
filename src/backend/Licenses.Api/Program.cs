@@ -1,5 +1,7 @@
+using Licenses.Api.Development;
 using Licenses.Api.Health;
 using Licenses.Api.Organization;
+using Licenses.Application.Authorization;
 using Licenses.Application.Organization;
 using Licenses.Infrastructure;
 using Licenses.Infrastructure.Development;
@@ -18,6 +20,9 @@ builder.Services.AddCors(options =>
             .AllowAnyMethod();
     });
 });
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICurrentActor, DevelopmentCurrentActor>();
+builder.Services.AddScoped<AuthorizationService>();
 builder.Services.AddHealthChecks();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddScoped<OrganizationService>();
@@ -45,6 +50,7 @@ if (app.Environment.IsDevelopment())
 
 app.MapHealthChecks("/health", HealthResponseWriter.ApiHealthOptions);
 app.MapHealthChecks("/health/ready", HealthResponseWriter.ReadinessHealthOptions);
+app.MapDevelopmentEndpoints();
 app.MapOrganizationEndpoints();
 
 app.Run();

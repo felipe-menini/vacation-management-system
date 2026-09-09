@@ -11,6 +11,12 @@ public sealed class OrganizationService(IOrganizationRepository repository, Time
         return units.Select(ToDto).ToList();
     }
 
+    public async Task<IReadOnlyList<OrgUnitDto>> ListOrgUnitsAsync(IReadOnlySet<Guid> allowedOrgUnitIds, CancellationToken cancellationToken)
+    {
+        var units = await repository.ListOrgUnitsAsync(cancellationToken);
+        return units.Where(x => allowedOrgUnitIds.Contains(x.Id)).Select(ToDto).ToList();
+    }
+
     public async Task<OrgUnitDto?> GetOrgUnitAsync(Guid id, CancellationToken cancellationToken)
     {
         var unit = await repository.GetOrgUnitAsync(id, cancellationToken);
@@ -21,6 +27,12 @@ public sealed class OrganizationService(IOrganizationRepository repository, Time
     {
         var units = await repository.ListOrgUnitsAsync(cancellationToken);
         return BuildTree(units, null);
+    }
+
+    public async Task<IReadOnlyList<OrgUnitTreeNodeDto>> GetOrgUnitTreeAsync(IReadOnlySet<Guid> allowedOrgUnitIds, CancellationToken cancellationToken)
+    {
+        var units = (await repository.ListOrgUnitsAsync(cancellationToken)).Where(x => allowedOrgUnitIds.Contains(x.Id)).ToList();
+        return BuildFilteredTree(units);
     }
 
     public async Task<OrgUnitDto> CreateOrgUnitAsync(CreateOrgUnitCommand command, CancellationToken cancellationToken)
@@ -51,23 +63,21 @@ public sealed class OrganizationService(IOrganizationRepository repository, Time
     public async Task<IReadOnlyList<UserDto>> ListUsersAsync(CancellationToken cancellationToken)
     {
         var users = await repository.ListUsersAsync(cancellationToken);
-        var units = (await repository.ListOrgUnitsAsync(cancellationToken)).ToDictionary(x => x.Id);
-        var result = new List<UserDto>();
-        foreach (var user in users)
-        {
-            var primary = (await repository.ListAssignmentsAsync(user.Id, cancellationToken))
-                .Where(x => x.IsPrimary && x.IsActiveAt(UtcNow()))
-                .OrderByDescending(x => x.EffectiveFromUtc)
-                .FirstOrDefault();
-            result.Add(ToDto(user, primary is not null && units.TryGetValue(primary.OrgUnitId, out var unit) ? ToDto(unit) : null));
-        }
-        return result;
+        return await ToUserDtosAsync(users, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<UserDto>> ListUsersAsync(IReadOnlySet<Guid> allowedOrgUnitIds, CancellationToken cancellationToken)
+    {
+        if (allowedOrgUnitIds.Count == 0) return [];
+        var users = await repository.ListUsersInOrgUnitsAsync(allowedOrgUnitIds.ToList(), UtcNow(), cancellationToken);
+        return await ToUserDtosAsync(users, cancellationToken);
     }
 
     public async Task<UserDto?> GetUserAsync(Guid id, CancellationToken cancellationToken)
     {
         var user = await repository.GetUserAsync(id, cancellationToken);
-        return user is null ? null : ToDto(user, null);
+        if (user is null) return null;
+        return (await ToUserDtosAsync([user], cancellationToken)).Single();
     }
 
     public async Task<UserDto> CreateUserAsync(CreateUserCommand command, CancellationToken cancellationToken)
@@ -86,7 +96,7 @@ public sealed class OrganizationService(IOrganizationRepository repository, Time
         await ValidateExternalIdentityAsync(command.ExternalIdentityId, id, cancellationToken);
         user.Update(command.DisplayName, command.Email, command.ExternalIdentityId, command.IsActive, UtcNow());
         await repository.SaveChangesAsync(cancellationToken);
-        return ToDto(user, null);
+        return (await ToUserDtosAsync([user], cancellationToken)).Single();
     }
 
     public async Task<IReadOnlyList<UserOrgAssignmentDto>?> ListAssignmentsAsync(Guid userId, CancellationToken cancellationToken)
@@ -110,6 +120,21 @@ public sealed class OrganizationService(IOrganizationRepository repository, Time
         await repository.SaveChangesAsync(cancellationToken);
         var unit = await repository.GetOrgUnitAsync(command.OrgUnitId, cancellationToken);
         return ToDto(assignment, unit?.Name ?? string.Empty);
+    }
+
+    private async Task<List<UserDto>> ToUserDtosAsync(IReadOnlyCollection<User> users, CancellationToken cancellationToken)
+    {
+        var units = (await repository.ListOrgUnitsAsync(cancellationToken)).ToDictionary(x => x.Id);
+        var result = new List<UserDto>();
+        foreach (var user in users)
+        {
+            var primary = (await repository.ListAssignmentsAsync(user.Id, cancellationToken))
+                .Where(x => x.IsPrimary && x.IsActiveAt(UtcNow()))
+                .OrderByDescending(x => x.EffectiveFromUtc)
+                .FirstOrDefault();
+            result.Add(ToDto(user, primary is not null && units.TryGetValue(primary.OrgUnitId, out var unit) ? ToDto(unit) : null));
+        }
+        return result;
     }
 
     private async Task ValidateOrgUnitAsync(string code, Guid? parentId, Guid? excludingId, CancellationToken cancellationToken)
@@ -136,4 +161,11 @@ public sealed class OrganizationService(IOrganizationRepository repository, Time
             .OrderBy(x => x.Name)
             .Select(x => new OrgUnitTreeNodeDto(x.Id, x.Name, x.Code, x.IsActive, BuildTree(units, x.Id)))
             .ToList();
+
+    private static List<OrgUnitTreeNodeDto> BuildFilteredTree(IReadOnlyCollection<OrgUnit> units)
+    {
+        var unitIds = units.Select(x => x.Id).ToHashSet();
+        var roots = units.Where(x => x.ParentId is null || !unitIds.Contains(x.ParentId.Value)).Select(x => x.ParentId).Distinct().ToList();
+        return roots.SelectMany(parentId => BuildTree(units, parentId)).ToList();
+    }
 }

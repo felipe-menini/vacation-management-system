@@ -33,6 +33,23 @@ Permissions are determined by Role + Organizational Scope. See [authorization.md
 
 Manual creation, revocation, and balance adjustment require mandatory reason and audit.
 
+
+
+## Implemented organization permissions
+
+The first authorization slice defines only organization-management capabilities:
+
+| Permission | Description |
+| --- | --- |
+| `org.units.read` | Read organizational units inside assigned scope. |
+| `org.units.manage` | Create/update organizational units inside assigned scope. |
+| `org.users.read` | Read users whose active organizational membership is inside assigned scope. |
+| `org.users.manage` | Create/update users within authorized organizational administration scope. |
+| `org.assignments.read` | Read user organizational assignments inside assigned scope. |
+| `org.assignments.manage` | Manage user organizational assignments inside assigned scope. |
+
+Leave, balance, approval, policy, audit, and document permissions are intentionally deferred until those capabilities exist.
+
 ## Open Decisions
 
 - Who can view medical certificates besides the employee and RRHH?

@@ -41,6 +41,16 @@ public sealed class EfOrganizationRepository(ApplicationDbContext dbContext) : I
     public Task<List<User>> ListUsersAsync(CancellationToken cancellationToken) =>
         dbContext.Users.AsNoTracking().OrderBy(x => x.DisplayName).ToListAsync(cancellationToken);
 
+    public Task<List<User>> ListUsersInOrgUnitsAsync(IReadOnlyCollection<Guid> orgUnitIds, DateTime utcNow, CancellationToken cancellationToken) =>
+        dbContext.Users.AsNoTracking()
+            .Where(user => user.IsActive && dbContext.UserOrgAssignments.Any(assignment =>
+                assignment.UserId == user.Id
+                && orgUnitIds.Contains(assignment.OrgUnitId)
+                && assignment.EffectiveFromUtc <= utcNow
+                && (assignment.EffectiveToUtc == null || assignment.EffectiveToUtc > utcNow)))
+            .OrderBy(x => x.DisplayName)
+            .ToListAsync(cancellationToken);
+
     public Task<User?> GetUserAsync(Guid id, CancellationToken cancellationToken) =>
         dbContext.Users.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 

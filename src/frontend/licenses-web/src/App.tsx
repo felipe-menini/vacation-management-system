@@ -1,14 +1,21 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 type HealthStatus = 'Loading' | 'Healthy' | 'Unhealthy' | 'Degraded' | 'Unavailable';
 
 type HealthResponse = { status: string };
 type OrgUnit = { id: string; name: string; code: string; parentId: string | null; isActive: boolean; children?: OrgUnit[] };
 type User = { id: string; displayName: string; email: string; isActive: boolean; primaryOrgUnit: OrgUnit | null };
+type DevelopmentActor = { id: string; displayName: string; email: string; primaryOrgUnitName: string | null };
 
 type StatusCardProps = { label: string; status: HealthStatus };
 
 const endpointPrefix = '/api';
+const selectedActorStorageKey = 'licenses.devActorId';
+const isDevelopment = import.meta.env.DEV;
+
+function developmentHeaders(actorId: string | null): HeadersInit {
+  return isDevelopment && actorId ? { 'X-Dev-User-Id': actorId } : {};
+}
 
 async function fetchHealth(path: string): Promise<HealthStatus> {
   try {
@@ -21,8 +28,8 @@ async function fetchHealth(path: string): Promise<HealthStatus> {
   }
 }
 
-async function fetchJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${endpointPrefix}${path}`);
+async function fetchJson<T>(path: string, actorId: string | null = null): Promise<T> {
+  const response = await fetch(`${endpointPrefix}${path}`, { headers: developmentHeaders(actorId) });
   if (!response.ok) throw new Error(`Request failed: ${response.status}`);
   return (await response.json()) as T;
 }
@@ -55,7 +62,11 @@ export function App() {
   const [databaseStatus, setDatabaseStatus] = useState<HealthStatus>('Loading');
   const [orgTree, setOrgTree] = useState<OrgUnit[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [actors, setActors] = useState<DevelopmentActor[]>([]);
+  const [selectedActorId, setSelectedActorId] = useState<string | null>(() => localStorage.getItem(selectedActorStorageKey));
   const [adminError, setAdminError] = useState<string | null>(null);
+
+  const selectedActor = useMemo(() => actors.find((actor) => actor.id === selectedActorId) ?? null, [actors, selectedActorId]);
 
   useEffect(() => {
     let isMounted = true;
@@ -71,11 +82,37 @@ export function App() {
       }
     }
 
+    async function loadActors() {
+      if (!isDevelopment) return;
+      try {
+        const actorList = await fetchJson<DevelopmentActor[]>('/dev/actors');
+        if (!isMounted) return;
+        setActors(actorList);
+        if (!selectedActorId && actorList.length > 0) {
+          setSelectedActorId(actorList[0].id);
+          localStorage.setItem(selectedActorStorageKey, actorList[0].id);
+        }
+      } catch {
+        if (isMounted) setActors([]);
+      }
+    }
+
+    void loadStatuses();
+    void loadActors();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedActorId]);
+
+  useEffect(() => {
+    let isMounted = true;
+
     async function loadAdminData() {
       try {
         const [tree, userList] = await Promise.all([
-          fetchJson<OrgUnit[]>('/org-units/tree'),
-          fetchJson<User[]>('/users'),
+          fetchJson<OrgUnit[]>('/org-units/tree', selectedActorId),
+          fetchJson<User[]>('/users', selectedActorId),
         ]);
         if (isMounted) {
           setOrgTree(tree);
@@ -83,17 +120,25 @@ export function App() {
           setAdminError(null);
         }
       } catch (error) {
-        if (isMounted) setAdminError(error instanceof Error ? error.message : 'Unable to load admin data.');
+        if (isMounted) {
+          setOrgTree([]);
+          setUsers([]);
+          setAdminError(error instanceof Error ? error.message : 'Unable to load admin data.');
+        }
       }
     }
 
-    void loadStatuses();
     void loadAdminData();
 
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [selectedActorId]);
+
+  function changeSelectedActor(actorId: string) {
+    setSelectedActorId(actorId);
+    localStorage.setItem(selectedActorStorageKey, actorId);
+  }
 
   return (
     <main className="page-shell">
@@ -101,7 +146,7 @@ export function App() {
         <p className="eyebrow">Corporate leave platform</p>
         <h1>Leave Management System</h1>
         <p className="summary">
-          Production-oriented walking skeleton with organizational structure validation.
+          Production-oriented walking skeleton with backend-enforced authorization for organizational data.
         </p>
       </section>
 
@@ -112,9 +157,22 @@ export function App() {
 
       <section className="admin-panel" aria-label="Development organization admin">
         <div>
-          <p className="eyebrow">Development admin</p>
+          <p className="eyebrow">Development authorization demo</p>
           <h2>Organization</h2>
-          <p className="warning">Temporary unsecured endpoints. Do not expose this screen in production.</p>
+          <p className="warning">Temporary Development-only actor selection. Production does not send or accept X-Dev-User-Id.</p>
+          {isDevelopment ? (
+            <label className="actor-selector">
+              <span>Act as</span>
+              <select value={selectedActorId ?? ''} onChange={(event) => changeSelectedActor(event.target.value)}>
+                {actors.map((actor) => (
+                  <option key={actor.id} value={actor.id}>
+                    {actor.displayName} {actor.primaryOrgUnitName ? `- ${actor.primaryOrgUnitName}` : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          {selectedActor ? <p className="muted">Current actor: {selectedActor.displayName}</p> : null}
           {adminError ? <p className="error">{adminError}</p> : null}
         </div>
         <div className="admin-grid">
@@ -123,7 +181,7 @@ export function App() {
             <OrgTree units={orgTree} />
           </article>
           <article className="panel-card">
-            <h3>Users</h3>
+            <h3>Users in scope</h3>
             <ul className="user-list">
               {users.map((user) => (
                 <li key={user.id}>
