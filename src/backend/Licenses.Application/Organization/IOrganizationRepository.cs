@@ -13,6 +13,7 @@ public interface IOrganizationRepository
     Task AddOrgUnitAsync(OrgUnit orgUnit, CancellationToken cancellationToken);
 
     Task<List<User>> ListUsersAsync(CancellationToken cancellationToken);
+    Task<List<User>> ListUsersInOrgUnitsAsync(IReadOnlyCollection<Guid> orgUnitIds, DateTime utcNow, CancellationToken cancellationToken);
     Task<User?> GetUserAsync(Guid id, CancellationToken cancellationToken);
     Task<bool> ExternalIdentityIdExistsAsync(string externalIdentityId, Guid? excludingId, CancellationToken cancellationToken);
     Task AddUserAsync(User user, CancellationToken cancellationToken);

@@ -55,6 +55,8 @@ h2, h3 { margin: 0 0 1rem; }
 .status-card strong[data-status="degraded"], .warning { color: #b54708; }
 
 .admin-panel { display: grid; gap: 1.5rem; padding: 1.5rem; border-radius: 24px; }
+.actor-selector { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin: 1rem 0; color: #526078; font-weight: 700; }
+.actor-selector select { min-width: min(100%, 18rem); padding: 0.65rem 0.75rem; border: 1px solid #b8c7dc; border-radius: 12px; background: #fff; color: #172033; }
 .panel-card { padding: 1.25rem; border-radius: 18px; box-shadow: none; }
 .org-tree, .org-tree ul, .user-list { margin: 0; padding-left: 1.25rem; }
 .org-tree li, .user-list li { margin: 0.5rem 0; }

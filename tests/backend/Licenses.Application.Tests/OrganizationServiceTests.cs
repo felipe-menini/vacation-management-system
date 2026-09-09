@@ -102,6 +102,7 @@ public sealed class OrganizationServiceTests
         }
         public Task AddOrgUnitAsync(OrgUnit orgUnit, CancellationToken cancellationToken) { _orgUnits.Add(orgUnit); return Task.CompletedTask; }
         public Task<List<User>> ListUsersAsync(CancellationToken cancellationToken) => Task.FromResult(_users.OrderBy(x => x.DisplayName).ToList());
+        public Task<List<User>> ListUsersInOrgUnitsAsync(IReadOnlyCollection<Guid> orgUnitIds, DateTime utcNow, CancellationToken cancellationToken) => Task.FromResult(_users.Where(user => user.IsActive && _assignments.Any(assignment => assignment.UserId == user.Id && orgUnitIds.Contains(assignment.OrgUnitId) && assignment.IsActiveAt(utcNow))).OrderBy(x => x.DisplayName).ToList());
         public Task<User?> GetUserAsync(Guid id, CancellationToken cancellationToken) => Task.FromResult(_users.SingleOrDefault(x => x.Id == id));
         public Task<bool> ExternalIdentityIdExistsAsync(string externalIdentityId, Guid? excludingId, CancellationToken cancellationToken) => Task.FromResult(_users.Any(x => x.ExternalIdentityId == externalIdentityId && (excludingId == null || x.Id != excludingId)));
         public Task AddUserAsync(User user, CancellationToken cancellationToken) { _users.Add(user); return Task.CompletedTask; }
