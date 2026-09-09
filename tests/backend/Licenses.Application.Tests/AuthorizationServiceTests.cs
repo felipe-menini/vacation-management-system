@@ -149,6 +149,26 @@ public sealed class AuthorizationServiceTests
         Assert.False(await _service.CanAccessUserAsync(manager.Id, PermissionCodes.OrgUsersRead, hrUser.Id, CancellationToken.None));
     }
 
+    [Fact]
+    public async Task GlobalPermissionDoesNotRequireTargetOrgUnitOwnership()
+    {
+        var setup = SeedTree();
+        var actor = AddActorWithRole(setup.Support, includeDescendants: false, PermissionCodes.LeaveCatalogRead);
+
+        Assert.True(await _service.CanUserPerformGlobalAsync(actor.Id, PermissionCodes.LeaveCatalogRead, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task GlobalPermissionDeniesKnownActorWithoutPermission()
+    {
+        var setup = SeedTree();
+        var actor = AddUser("Actor", setup.Support);
+        var role = AddRole(true);
+        _repository.RoleScopeAssignments.Add(RoleScopeAssignment.Create(actor.Id, role.Id, setup.Support.Id, false, _now.AddDays(-1), null));
+
+        Assert.False(await _service.CanUserPerformGlobalAsync(actor.Id, PermissionCodes.LeaveCatalogRead, CancellationToken.None));
+    }
+
     private OrgSetup SeedTree()
     {
         var company = OrgUnit.Create("Company", "COMPANY", null, _now);

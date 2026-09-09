@@ -1,7 +1,9 @@
 using Licenses.Api.Development;
 using Licenses.Api.Health;
+using Licenses.Api.LeaveManagement;
 using Licenses.Api.Organization;
 using Licenses.Application.Authorization;
+using Licenses.Application.LeaveManagement;
 using Licenses.Application.Organization;
 using Licenses.Infrastructure;
 using Licenses.Infrastructure.Development;
@@ -26,6 +28,7 @@ builder.Services.AddScoped<AuthorizationService>();
 builder.Services.AddHealthChecks();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddScoped<OrganizationService>();
+builder.Services.AddScoped<LeaveCatalogService>();
 
 var app = builder.Build();
 
@@ -52,6 +55,7 @@ app.MapHealthChecks("/health", HealthResponseWriter.ApiHealthOptions);
 app.MapHealthChecks("/health/ready", HealthResponseWriter.ReadinessHealthOptions);
 app.MapDevelopmentEndpoints();
 app.MapOrganizationEndpoints();
+app.MapLeaveCatalogEndpoints();
 
 app.Run();
 

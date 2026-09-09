@@ -1,6 +1,7 @@
 using Licenses.Application.Authorization;
 using Licenses.Domain.Authorization;
 using Licenses.Domain.Identity;
+using Licenses.Domain.LeaveManagement;
 using Licenses.Domain.Organization;
 using Licenses.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -17,7 +18,10 @@ public static class DevelopmentOrganizationSeeder
 
         await using var scope = host.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        await db.Database.MigrateAsync(cancellationToken);
+        if ((await db.Database.GetPendingMigrationsAsync(cancellationToken)).Any())
+        {
+            await db.Database.MigrateAsync(cancellationToken);
+        }
 
         var now = DateTime.UtcNow;
         var company = await EnsureOrgUnitAsync(db, "Company", "COMPANY", null, now, cancellationToken);
@@ -32,7 +36,7 @@ public static class DevelopmentOrganizationSeeder
         var supportUser = await EnsureUserWithPrimaryAssignmentAsync(db, "Support User", "support.user@example.test", support.Id, now, cancellationToken);
         var developmentUser = await EnsureUserWithPrimaryAssignmentAsync(db, "Development User", "development.user@example.test", development.Id, now, cancellationToken);
         var cybersecurityUser = await EnsureUserWithPrimaryAssignmentAsync(db, "Cybersecurity User", "cybersecurity.user@example.test", cybersecurity.Id, now, cancellationToken);
-        await EnsureUserWithPrimaryAssignmentAsync(db, "HR User", "hr.user@example.test", hr.Id, now, cancellationToken);
+        var hrUser = await EnsureUserWithPrimaryAssignmentAsync(db, "HR User", "hr.user@example.test", hr.Id, now, cancellationToken);
 
         var permissions = await EnsurePermissionCatalogAsync(db, cancellationToken);
         var employee = await EnsureRoleAsync(db, "EMPLOYEE", "Employee", "Base employee capabilities.", now, cancellationToken);
@@ -41,10 +45,10 @@ public static class DevelopmentOrganizationSeeder
         var hrRole = await EnsureRoleAsync(db, "HR", "HR", "Organization-wide HR administration.", now, cancellationToken);
         var techAdmin = await EnsureRoleAsync(db, "TECH_ADMIN", "Technical Administrator", "Technical platform administration without default HR authority.", now, cancellationToken);
 
-        await EnsureRolePermissionsAsync(db, employee, [], permissions, cancellationToken);
-        await EnsureRolePermissionsAsync(db, supervisor, [PermissionCodes.OrgUnitsRead, PermissionCodes.OrgUsersRead, PermissionCodes.OrgAssignmentsRead], permissions, cancellationToken);
-        await EnsureRolePermissionsAsync(db, manager, [PermissionCodes.OrgUnitsRead, PermissionCodes.OrgUnitsManage, PermissionCodes.OrgUsersRead, PermissionCodes.OrgUsersManage, PermissionCodes.OrgAssignmentsRead, PermissionCodes.OrgAssignmentsManage], permissions, cancellationToken);
-        await EnsureRolePermissionsAsync(db, hrRole, [PermissionCodes.OrgUnitsRead, PermissionCodes.OrgUnitsManage, PermissionCodes.OrgUsersRead, PermissionCodes.OrgUsersManage, PermissionCodes.OrgAssignmentsRead, PermissionCodes.OrgAssignmentsManage], permissions, cancellationToken);
+        await EnsureRolePermissionsAsync(db, employee, [PermissionCodes.LeaveCatalogRead], permissions, cancellationToken);
+        await EnsureRolePermissionsAsync(db, supervisor, [PermissionCodes.OrgUnitsRead, PermissionCodes.OrgUsersRead, PermissionCodes.OrgAssignmentsRead, PermissionCodes.LeaveCatalogRead], permissions, cancellationToken);
+        await EnsureRolePermissionsAsync(db, manager, [PermissionCodes.OrgUnitsRead, PermissionCodes.OrgUnitsManage, PermissionCodes.OrgUsersRead, PermissionCodes.OrgUsersManage, PermissionCodes.OrgAssignmentsRead, PermissionCodes.OrgAssignmentsManage, PermissionCodes.LeaveCatalogRead], permissions, cancellationToken);
+        await EnsureRolePermissionsAsync(db, hrRole, [PermissionCodes.OrgUnitsRead, PermissionCodes.OrgUnitsManage, PermissionCodes.OrgUsersRead, PermissionCodes.OrgUsersManage, PermissionCodes.OrgAssignmentsRead, PermissionCodes.OrgAssignmentsManage, PermissionCodes.LeaveCatalogRead, PermissionCodes.LeaveCatalogManage], permissions, cancellationToken);
         await EnsureRolePermissionsAsync(db, techAdmin, [PermissionCodes.OrgUnitsRead], permissions, cancellationToken);
 
         await EnsureRoleScopeAssignmentAsync(db, felipe.Id, manager.Id, it.Id, includeDescendants: true, now, cancellationToken);
@@ -52,6 +56,9 @@ public static class DevelopmentOrganizationSeeder
         await EnsureRoleScopeAssignmentAsync(db, supportUser.Id, employee.Id, support.Id, includeDescendants: false, now, cancellationToken);
         await EnsureRoleScopeAssignmentAsync(db, developmentUser.Id, employee.Id, development.Id, includeDescendants: false, now, cancellationToken);
         await EnsureRoleScopeAssignmentAsync(db, cybersecurityUser.Id, employee.Id, cybersecurity.Id, includeDescendants: false, now, cancellationToken);
+        await EnsureRoleScopeAssignmentAsync(db, hrUser.Id, hrRole.Id, company.Id, includeDescendants: true, now, cancellationToken);
+
+        await EnsureLeaveCatalogSeedAsync(db, now, cancellationToken);
 
         await db.SaveChangesAsync(cancellationToken);
     }
@@ -95,7 +102,9 @@ public static class DevelopmentOrganizationSeeder
             [PermissionCodes.OrgUsersRead] = "Read users inside authorized organizational scope.",
             [PermissionCodes.OrgUsersManage] = "Create and update users inside authorized organizational scope.",
             [PermissionCodes.OrgAssignmentsRead] = "Read user organizational assignments inside authorized scope.",
-            [PermissionCodes.OrgAssignmentsManage] = "Manage user organizational assignments inside authorized scope."
+            [PermissionCodes.OrgAssignmentsManage] = "Manage user organizational assignments inside authorized scope.",
+            [PermissionCodes.LeaveCatalogRead] = "Read leave catalog configuration.",
+            [PermissionCodes.LeaveCatalogManage] = "Create and update leave catalog configuration."
         };
 
         foreach (var item in catalog)
@@ -139,5 +148,29 @@ public static class DevelopmentOrganizationSeeder
         {
             await db.RoleScopeAssignments.AddAsync(RoleScopeAssignment.Create(userId, roleId, orgUnitId, includeDescendants, now, effectiveToUtc: null), cancellationToken);
         }
+    }
+
+    private static async Task EnsureLeaveCatalogSeedAsync(ApplicationDbContext db, DateTime now, CancellationToken cancellationToken)
+    {
+        await EnsureLeaveTypeAsync(db, "VACATION", "Vacation", null, 10, now, cancellationToken);
+        await EnsureLeaveTypeAsync(db, "MEDICAL", "Medical Leave", null, 20, now, cancellationToken);
+        await EnsureLeaveTypeAsync(db, "MEDICAL_EXAM", "Medical Examination", null, 30, now, cancellationToken);
+        await EnsureLeaveTypeAsync(db, "STUDY", "Study Leave", null, 40, now, cancellationToken);
+        await EnsureLeaveTypeAsync(db, "BEREAVEMENT", "Bereavement Leave", null, 50, now, cancellationToken);
+
+        await EnsureBalanceBucketAsync(db, "VACATION_DAYS", "Vacation Days", null, BalanceBucketUnit.Day, now, cancellationToken);
+        await EnsureBalanceBucketAsync(db, "MEDICAL_EXAM_DAYS", "Medical Examination Days", null, BalanceBucketUnit.Day, now, cancellationToken);
+    }
+
+    private static async Task EnsureLeaveTypeAsync(ApplicationDbContext db, string code, string name, string? description, int sortOrder, DateTime now, CancellationToken cancellationToken)
+    {
+        if (await db.LeaveTypes.AnyAsync(x => x.Code == code, cancellationToken)) return;
+        await db.LeaveTypes.AddAsync(LeaveType.Create(code, name, description, sortOrder, isActive: true, now), cancellationToken);
+    }
+
+    private static async Task EnsureBalanceBucketAsync(ApplicationDbContext db, string code, string name, string? description, BalanceBucketUnit unit, DateTime now, CancellationToken cancellationToken)
+    {
+        if (await db.BalanceBuckets.AnyAsync(x => x.Code == code, cancellationToken)) return;
+        await db.BalanceBuckets.AddAsync(BalanceBucket.Create(code, name, description, unit, isActive: true, now), cancellationToken);
     }
 }
