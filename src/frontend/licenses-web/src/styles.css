@@ -69,3 +69,23 @@ h2, h3 { margin: 0 0 1rem; }
   .status-grid, .admin-grid { grid-template-columns: 1fr; }
   .status-card { align-items: flex-start; flex-direction: column; }
 }
+.tabs { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+.tabs button, .catalog-form button, .catalog-row button {
+  cursor: pointer;
+  border: 1px solid #b8c7dc;
+  border-radius: 999px;
+  background: #fff;
+  color: #315fb5;
+  font-weight: 700;
+  padding: 0.65rem 0.9rem;
+}
+.tabs button.active, .catalog-form button { background: #315fb5; color: #fff; border-color: #315fb5; }
+.catalog-list { display: grid; gap: 0.7rem; }
+.catalog-row { display: grid; grid-template-columns: 1fr 1.5fr repeat(2, minmax(5rem, auto)); align-items: center; gap: 0.75rem; padding: 0.8rem; border: 1px solid #eef2f8; border-radius: 14px; }
+.catalog-row span:first-child { color: #315fb5; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-weight: 700; }
+.catalog-form { display: grid; gap: 0.75rem; }
+.catalog-form input { width: 100%; padding: 0.7rem 0.8rem; border: 1px solid #b8c7dc; border-radius: 12px; color: #172033; }
+
+@media (max-width: 760px) {
+  .catalog-row { grid-template-columns: 1fr; align-items: flex-start; }
+}

@@ -1,6 +1,8 @@
 using Licenses.Application.Authorization;
 using Licenses.Application.Organization;
 using Licenses.Infrastructure.Health;
+using Licenses.Infrastructure.LeaveManagement;
+using Licenses.Application.LeaveManagement;
 using Licenses.Infrastructure.Authorization;
 using Licenses.Infrastructure.Organization;
 using Licenses.Infrastructure.Persistence;
@@ -28,6 +30,7 @@ public static class DependencyInjection
         });
 
         services.AddScoped<IOrganizationRepository, EfOrganizationRepository>();
+        services.AddScoped<ILeaveCatalogRepository, EfLeaveCatalogRepository>();
         services.AddScoped<IAuthorizationRepository, EfAuthorizationRepository>();
         services.AddSingleton(TimeProvider.System);
 

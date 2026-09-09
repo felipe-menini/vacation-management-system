@@ -1,5 +1,6 @@
 using Licenses.Domain.Authorization;
 using Licenses.Domain.Identity;
+using Licenses.Domain.LeaveManagement;
 using Licenses.Domain.Organization;
 using Microsoft.EntityFrameworkCore;
 
@@ -14,6 +15,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<RoleScopeAssignment> RoleScopeAssignments => Set<RoleScopeAssignment>();
+    public DbSet<LeaveType> LeaveTypes => Set<LeaveType>();
+    public DbSet<BalanceBucket> BalanceBuckets => Set<BalanceBucket>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

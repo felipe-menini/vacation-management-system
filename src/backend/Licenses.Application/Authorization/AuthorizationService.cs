@@ -2,6 +2,21 @@ namespace Licenses.Application.Authorization;
 
 public sealed class AuthorizationService(IAuthorizationRepository repository, TimeProvider timeProvider)
 {
+    public async Task<bool> CanUserPerformGlobalAsync(Guid actorUserId, string permissionCode, CancellationToken cancellationToken)
+    {
+        var now = UtcNow();
+        var actor = await repository.GetUserAsync(actorUserId, cancellationToken);
+        if (actor is null || !actor.IsActive) return false;
+
+        var assignments = await repository.ListActiveRoleScopeAssignmentsAsync(actorUserId, now, cancellationToken);
+        foreach (var assignment in assignments)
+        {
+            if (!await repository.IsRoleActiveAsync(assignment.RoleId, cancellationToken)) continue;
+            if (await repository.RoleHasPermissionAsync(assignment.RoleId, NormalizePermissionCode(permissionCode), cancellationToken)) return true;
+        }
+
+        return false;
+    }
     public async Task<bool> CanUserPerformAsync(Guid actorUserId, string permissionCode, Guid targetOrgUnitId, CancellationToken cancellationToken)
     {
         var allowedOrgUnits = await GetAuthorizedOrgUnitIdsAsync(actorUserId, permissionCode, cancellationToken);
