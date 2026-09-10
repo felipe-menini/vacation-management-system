@@ -8,6 +8,9 @@ type User = { id: string; displayName: string; email: string; isActive: boolean;
 type DevelopmentActor = { id: string; displayName: string; email: string; primaryOrgUnitName: string | null };
 type LeaveType = { id: string; code: string; name: string; description: string | null; isActive: boolean; sortOrder: number };
 type BalanceBucket = { id: string; code: string; name: string; description: string | null; unit: string; isActive: boolean };
+type LeavePolicy = { id: string; leaveTypeId: string; leaveTypeCode: string; leaveTypeName: string; orgUnitId: string | null; orgUnitCode: string | null; orgUnitName: string | null; appliesToDescendants: boolean; isActive: boolean };
+type LeavePolicyVersion = { id: string; leavePolicyId: string; versionNumber: number; status: string; effectiveFrom: string; effectiveTo: string | null; dayCountMode: string; allowHalfDay: boolean; minimumNoticeDays: number | null; noticeDayCountMode: string; maximumRequestDays: number | null; overlapBehavior: string; consumesBalance: boolean; balanceBucketId: string | null; balanceBucketCode: string | null; balanceBucketName: string | null };
+type ResolvePolicyResult = { found: boolean; policy: LeavePolicy | null; version: LeavePolicyVersion | null; reason: string | null };
 
 type StatusCardProps = { label: string; status: HealthStatus };
 type CatalogKind = 'leave-types' | 'balance-buckets';
@@ -47,6 +50,22 @@ async function sendJson<T>(path: string, method: 'POST' | 'PUT', body: unknown, 
   return (await response.json()) as T;
 }
 
+function versionPayloadFromForm(data: FormData) {
+  const consumesBalance = data.get('consumesBalance') === 'on';
+  return {
+    effectiveFrom: data.get('effectiveFrom'),
+    effectiveTo: data.get('effectiveTo') || null,
+    dayCountMode: data.get('dayCountMode'),
+    allowHalfDay: data.get('allowHalfDay') === 'on',
+    minimumNoticeDays: data.get('minimumNoticeDays') === '' ? null : Number(data.get('minimumNoticeDays')),
+    noticeDayCountMode: data.get('noticeDayCountMode'),
+    maximumRequestDays: data.get('maximumRequestDays') === '' ? null : Number(data.get('maximumRequestDays')),
+    overlapBehavior: data.get('overlapBehavior'),
+    consumesBalance,
+    balanceBucketId: consumesBalance ? data.get('balanceBucketId') || null : null,
+  };
+}
+
 function StatusCard({ label, status }: StatusCardProps) {
   return (
     <article className="status-card">
@@ -82,6 +101,10 @@ export function App() {
   const [catalogTab, setCatalogTab] = useState<CatalogKind>('leave-types');
   const [adminError, setAdminError] = useState<string | null>(null);
   const [catalogMessage, setCatalogMessage] = useState<string | null>(null);
+  const [policies, setPolicies] = useState<LeavePolicy[]>([]);
+  const [versionsByPolicy, setVersionsByPolicy] = useState<Record<string, LeavePolicyVersion[]>>({});
+  const [policyMessage, setPolicyMessage] = useState<string | null>(null);
+  const [resolvedPolicy, setResolvedPolicy] = useState<ResolvePolicyResult | null>(null);
 
   const selectedActor = useMemo(() => actors.find((actor) => actor.id === selectedActorId) ?? null, [actors, selectedActorId]);
 
@@ -92,6 +115,13 @@ export function App() {
     ]);
     setLeaveTypes(types);
     setBalanceBuckets(buckets);
+  }
+
+  async function loadPolicies(actorId: string | null) {
+    const list = await fetchJson<LeavePolicy[]>('/leave-policies', actorId);
+    const versionEntries = await Promise.all(list.map(async (policy) => [policy.id, await fetchJson<LeavePolicyVersion[]>(`/leave-policies/${policy.id}/versions`, actorId)] as const));
+    setPolicies(list);
+    setVersionsByPolicy(Object.fromEntries(versionEntries));
   }
 
   useEffect(() => {
@@ -167,8 +197,22 @@ export function App() {
       }
     }
 
+    async function loadPolicyData() {
+      try {
+        await loadPolicies(selectedActorId);
+        if (isMounted) setPolicyMessage(null);
+      } catch (error) {
+        if (isMounted) {
+          setPolicies([]);
+          setVersionsByPolicy({});
+          setPolicyMessage(error instanceof Error ? error.message : 'Unable to load policy data.');
+        }
+      }
+    }
+
     void loadAdminData();
     void loadCatalogData();
+    void loadPolicyData();
 
     return () => {
       isMounted = false;
@@ -246,6 +290,68 @@ export function App() {
     }
   }
 
+  async function createPolicy(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    try {
+      await sendJson<LeavePolicy>('/leave-policies', 'POST', {
+        leaveTypeId: data.get('leaveTypeId'),
+        orgUnitId: data.get('orgUnitId') || null,
+        appliesToDescendants: data.get('appliesToDescendants') === 'on',
+      }, selectedActorId);
+      event.currentTarget.reset();
+      await loadPolicies(selectedActorId);
+      setPolicyMessage('Policy saved.');
+    } catch (error) {
+      setPolicyMessage(error instanceof Error ? error.message : 'Unable to save policy.');
+    }
+  }
+
+  async function createVersion(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    try {
+      await sendJson<LeavePolicyVersion>(`/leave-policies/${data.get('policyId')}/versions`, 'POST', versionPayloadFromForm(data), selectedActorId);
+      event.currentTarget.reset();
+      await loadPolicies(selectedActorId);
+      setPolicyMessage('Draft version saved.');
+    } catch (error) {
+      setPolicyMessage(error instanceof Error ? error.message : 'Unable to save policy version.');
+    }
+  }
+
+  async function updateVersion(event: FormEvent<HTMLFormElement>, versionId: string) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    try {
+      await sendJson<LeavePolicyVersion>(`/leave-policy-versions/${versionId}`, 'PUT', versionPayloadFromForm(data), selectedActorId);
+      await loadPolicies(selectedActorId);
+      setPolicyMessage('Draft version updated.');
+    } catch (error) {
+      setPolicyMessage(error instanceof Error ? error.message : 'Unable to update policy version.');
+    }
+  }
+
+  async function publishVersion(versionId: string) {
+    try {
+      await sendJson<LeavePolicyVersion>(`/leave-policy-versions/${versionId}/publish`, 'POST', {}, selectedActorId);
+      await loadPolicies(selectedActorId);
+      setPolicyMessage('Version published.');
+    } catch (error) {
+      setPolicyMessage(error instanceof Error ? error.message : 'Unable to publish version.');
+    }
+  }
+
+  async function resolvePolicy(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    try {
+      setResolvedPolicy(await fetchJson<ResolvePolicyResult>(`/leave-policies/resolve?leaveTypeId=${data.get('leaveTypeId')}&orgUnitId=${data.get('orgUnitId') || ''}&date=${data.get('date')}`, selectedActorId));
+    } catch (error) {
+      setPolicyMessage(error instanceof Error ? error.message : 'Unable to resolve policy.');
+    }
+  }
+
   return (
     <main className="page-shell">
       <section className="hero">
@@ -302,6 +408,107 @@ export function App() {
           <CatalogForm title="Create leave type" codePlaceholder="VACATION" namePlaceholder="Vacation" onSubmit={createLeaveType} includeSortOrder />
           <CatalogForm title="Create balance bucket" codePlaceholder="VACATION_DAYS" namePlaceholder="Vacation Days" onSubmit={createBalanceBucket} unit="DAY" />
         </div>
+      </section>
+
+      <section className="admin-panel" aria-label="Leave policy admin">
+        <div>
+          <p className="eyebrow">Leave policies</p>
+          <h2>Policy configuration and versioning</h2>
+          <p className="muted">Published versions are immutable. Future leave requests must store the exact policy version used.</p>
+          {policyMessage ? <p className={policyMessage.includes('failed') || policyMessage.includes('403') || policyMessage.includes('401') ? 'error' : 'muted'}>{policyMessage}</p> : null}
+        </div>
+        <div className="admin-grid">
+          <form className="panel-card catalog-form" onSubmit={createPolicy}>
+            <h3>Create policy</h3>
+            <select name="leaveTypeId" required>
+              <option value="">Select leave type</option>
+              {leaveTypes.map((type) => <option key={type.id} value={type.id}>{type.code} - {type.name}</option>)}
+            </select>
+            <select name="orgUnitId">
+              <option value="">Company-wide</option>
+              {flattenOrgUnits(orgTree).map((unit) => <option key={unit.id} value={unit.id}>{unit.code} - {unit.name}</option>)}
+            </select>
+            <label><input name="appliesToDescendants" type="checkbox" /> Applies to descendants</label>
+            <button type="submit">Create policy</button>
+          </form>
+          <form className="panel-card catalog-form" onSubmit={createVersion}>
+            <h3>Create draft version</h3>
+            <select name="policyId" required>
+              <option value="">Select policy</option>
+              {policies.map((policy) => <option key={policy.id} value={policy.id}>{policy.leaveTypeCode} - {policy.orgUnitCode ?? 'COMPANY'}</option>)}
+            </select>
+            <input name="effectiveFrom" type="date" required />
+            <input name="effectiveTo" type="date" />
+            <select name="dayCountMode" defaultValue="BUSINESS_DAYS"><option>BUSINESS_DAYS</option><option>CALENDAR_DAYS</option></select>
+            <label><input name="allowHalfDay" type="checkbox" /> Allow half day</label>
+            <input name="minimumNoticeDays" type="number" min="0" placeholder="Minimum notice days" />
+            <select name="noticeDayCountMode" defaultValue="CALENDAR_DAYS"><option>BUSINESS_DAYS</option><option>CALENDAR_DAYS</option></select>
+            <input name="maximumRequestDays" type="number" min="0.5" step="0.5" placeholder="Maximum request days" />
+            <select name="overlapBehavior" defaultValue="BLOCK"><option>BLOCK</option><option>WARN</option><option>ALLOW</option></select>
+            <label><input name="consumesBalance" type="checkbox" /> Consumes balance</label>
+            <select name="balanceBucketId">
+              <option value="">No bucket</option>
+              {balanceBuckets.map((bucket) => <option key={bucket.id} value={bucket.id}>{bucket.code}</option>)}
+            </select>
+            <button type="submit">Create draft</button>
+          </form>
+        </div>
+        <article className="panel-card">
+          <h3>Configured policies</h3>
+          <div className="catalog-list">
+            {policies.map((policy) => (
+              <div className="policy-card" key={policy.id}>
+                <strong>{policy.leaveTypeCode} - {policy.orgUnitCode ?? 'COMPANY'}</strong>
+                <span>{policy.orgUnitId ? `Override${policy.appliesToDescendants ? ' with descendants' : ''}` : 'Company-wide'} · {policy.isActive ? 'Active' : 'Inactive'}</span>
+                {(versionsByPolicy[policy.id] ?? []).map((version) => (
+                  <div className="version-row" key={version.id}>
+                    <span className={`badge ${version.status.toLowerCase()}`}>{version.status}</span>
+                    <span>v{version.versionNumber}: {version.effectiveFrom} → {version.effectiveTo ?? 'open'}</span>
+                    <span>{version.dayCountMode}, half day: {version.allowHalfDay ? 'yes' : 'no'}, notice: {version.minimumNoticeDays ?? 'none'} {version.noticeDayCountMode}, max: {version.maximumRequestDays ?? 'none'}, overlap: {version.overlapBehavior}, balance: {version.consumesBalance ? version.balanceBucketCode : 'no'}</span>
+                    {version.status === 'DRAFT' ? (
+                      <>
+                        <details>
+                          <summary>Edit draft</summary>
+                          <form className="catalog-form inline-form" onSubmit={(event) => updateVersion(event, version.id)}>
+                            <input name="effectiveFrom" type="date" required defaultValue={version.effectiveFrom} />
+                            <input name="effectiveTo" type="date" defaultValue={version.effectiveTo ?? ''} />
+                            <select name="dayCountMode" defaultValue={version.dayCountMode}><option>BUSINESS_DAYS</option><option>CALENDAR_DAYS</option></select>
+                            <label><input name="allowHalfDay" type="checkbox" defaultChecked={version.allowHalfDay} /> Allow half day</label>
+                            <input name="minimumNoticeDays" type="number" min="0" placeholder="Minimum notice days" defaultValue={version.minimumNoticeDays ?? ''} />
+                            <select name="noticeDayCountMode" defaultValue={version.noticeDayCountMode}><option>BUSINESS_DAYS</option><option>CALENDAR_DAYS</option></select>
+                            <input name="maximumRequestDays" type="number" min="0.5" step="0.5" placeholder="Maximum request days" defaultValue={version.maximumRequestDays ?? ''} />
+                            <select name="overlapBehavior" defaultValue={version.overlapBehavior}><option>BLOCK</option><option>WARN</option><option>ALLOW</option></select>
+                            <label><input name="consumesBalance" type="checkbox" defaultChecked={version.consumesBalance} /> Consumes balance</label>
+                            <select name="balanceBucketId" defaultValue={version.balanceBucketId ?? ''}>
+                              <option value="">No bucket</option>
+                              {balanceBuckets.map((bucket) => <option key={bucket.id} value={bucket.id}>{bucket.code}</option>)}
+                            </select>
+                            <button type="submit">Update draft</button>
+                          </form>
+                        </details>
+                        <button type="button" onClick={() => publishVersion(version.id)}>Publish</button>
+                      </>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </article>
+        <form className="panel-card catalog-form" onSubmit={resolvePolicy}>
+          <h3>Resolve policy</h3>
+          <select name="leaveTypeId" required>
+            <option value="">Select leave type</option>
+            {leaveTypes.map((type) => <option key={type.id} value={type.id}>{type.code}</option>)}
+          </select>
+          <select name="orgUnitId">
+            <option value="">No org unit</option>
+            {flattenOrgUnits(orgTree).map((unit) => <option key={unit.id} value={unit.id}>{unit.code}</option>)}
+          </select>
+          <input name="date" type="date" required defaultValue="2026-01-01" />
+          <button type="submit">Resolve</button>
+          {resolvedPolicy ? <p className="muted">{resolvedPolicy.found ? `Resolved ${resolvedPolicy.policy?.leaveTypeCode} ${resolvedPolicy.policy?.orgUnitCode ?? 'COMPANY'} v${resolvedPolicy.version?.versionNumber}` : resolvedPolicy.reason}</p> : null}
+        </form>
       </section>
 
       <section className="admin-panel" aria-label="Development organization admin">
@@ -362,4 +569,8 @@ function CatalogForm({ title, codePlaceholder, namePlaceholder, onSubmit, includ
       <button type="submit">Create</button>
     </form>
   );
+}
+
+function flattenOrgUnits(units: OrgUnit[]): OrgUnit[] {
+  return units.flatMap((unit) => [unit, ...flattenOrgUnits(unit.children ?? [])]);
 }

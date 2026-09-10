@@ -10,6 +10,8 @@ public static class PermissionCodes
     public const string OrgAssignmentsManage = "org.assignments.manage";
     public const string LeaveCatalogRead = "leave.catalog.read";
     public const string LeaveCatalogManage = "leave.catalog.manage";
+    public const string LeavePoliciesRead = "leave.policies.read";
+    public const string LeavePoliciesManage = "leave.policies.manage";
 }
 
 public sealed record CurrentActor(Guid UserId);
