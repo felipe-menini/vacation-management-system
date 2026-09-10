@@ -64,3 +64,14 @@ Leave requests, balances, approvals, audit, and document permissions are intenti
 ## Implemented leave policy permissions
 
 EP-04 adds `leave.policies.read` and `leave.policies.manage`. Development seed grants read to Employee, Supervisor, Manager, and HR. HR receives manage. Technical Administrator does not receive policy manage by default because policy configuration is an HR/business capability, not technical administration.
+
+## Implemented working calendar permissions
+
+EP-05 adds:
+
+| Permission | Description |
+| --- | --- |
+| `leave.calendars.read` | Read working calendars, weekday rules, dated exceptions, and use the calculation inspector. |
+| `leave.calendars.manage` | Create/update working calendars and dated exceptions. |
+
+Development seed grants calendar read to Employee, Supervisor, Manager, and HR. HR receives calendar manage. Technical Administrator does not receive calendar manage by default because working-calendar configuration is a business/HR capability, not automatic technical administration.

@@ -40,7 +40,7 @@ erDiagram
 | `LeavePolicy` | Stable company-wide or OrgUnit-scoped policy definition for a leave type. |
 | `BalanceBucketType` | Balance concept such as vacation, study leave, or medical exams. |
 | `LeavePolicyVersion` | Effective dated rule set for a leave type and optionally a unit. |
-| `HolidayCalendar` / `Holiday` | Assignable holiday calendars. |
+| `WorkingCalendar` | Stable configurable working calendar with weekday rules and dated exceptions. |
 | `LeaveRequest` | Request with dates, AM/PM segments, calculated days, applied policy version, and state. |
 | `LeaveRequestDay` | Optional per-day detail for complex calculation and half-days. |
 | `ApprovalInstance` / `ApprovalStep` | Resolved workflow instance and approvers. |
@@ -73,3 +73,9 @@ erDiagram
 ## Implemented policy/version model
 
 EP-04 implements `LeavePolicy` as the stable policy scoped to a LeaveType and optional OrgUnit, and `LeavePolicyVersion` as the exact effective-dated rule set. Draft versions can be edited, while published versions are immutable and resolver-visible. Future leave requests must store the exact published policy version used when evaluated, so later publications do not rewrite historical request semantics.
+
+## Implemented working-calendar model
+
+EP-05 implements `WorkingCalendar` as the stable calendar selected by policy versions that need business-day semantics. Calendar dates use `DateOnly`, not UTC timestamps. Each calendar owns exactly one configurable weekday rule for Monday through Sunday; there is no hardcoded global weekend concept. `WorkingCalendarException` stores dated overrides, and an explicit exception wins over the weekday rule. `IsWorkingDay = false` represents a non-working date, while `IsWorkingDay = true` represents an exceptional working date.
+
+`LeavePolicyVersion.WorkingCalendarId` is required when `DayCountMode` or `NoticeDayCountMode` is `BUSINESS_DAYS`, and may be null when both modes are `CALENDAR_DAYS`. New publication rejects inactive calendars, while already-published historical versions remain readable if the referenced calendar is later deactivated.

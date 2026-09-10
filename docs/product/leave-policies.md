@@ -29,10 +29,14 @@ Individual exceptions should be restricted to RRHH and explicitly recorded, pref
 
 ## Calendars and holidays
 
-- Holidays are stored in calendars assigned by site, country, or organizational unit.
-- A policy chooses which calendar applies.
+- Working days are stored in configurable working calendars.
+- A policy version chooses which working calendar applies when it uses `BUSINESS_DAYS`.
+- Weekly working schedules are configurable per calendar; weekends are not hardcoded globally.
+- Dated calendar exceptions override weekday rules.
 - Leave dates are stored as business dates.
 - Action and audit timestamps are stored in UTC and displayed in the organization/user time zone.
+- No real-country holiday dataset is hardcoded in EP-05.
+- `CALENDAR_DAYS` counts every date and does not exclude weekends or holidays.
 
 ## Balance ledger
 
@@ -69,3 +73,7 @@ The implemented policy model now separates stable `LeavePolicy` records from eff
 Published versions are immutable and resolver-visible. Draft versions can be edited but never resolve. Published periods for the same policy must not overlap. Policy resolution prefers the deepest applicable OrgUnit override and then falls back to the company-wide LeaveType policy. A future LeaveRequest must reference the exact published `LeavePolicyVersion` used during evaluation.
 
 EP-04 stores day count mode, half-day allowance, notice days/mode, maximum request days, overlap behavior, and balance consumption bucket. It still does not calculate business days, holidays, actual leave-request overlaps, approvals, requests, ledger movements, user balances, carry-over, expiry, attachments, Entra, SharePoint, or capacity.
+
+## Implemented EP-05 working-calendar slice
+
+EP-05 adds reusable day calculation for inclusive date ranges. `BUSINESS_DAYS` uses the selected `WorkingCalendar`; `CALENDAR_DAYS` does not require a calendar. LeaveRequest creation, notice enforcement, AM/PM half-day semantics, and request-specific date validation remain future work.

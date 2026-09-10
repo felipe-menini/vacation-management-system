@@ -19,6 +19,9 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<BalanceBucket> BalanceBuckets => Set<BalanceBucket>();
     public DbSet<LeavePolicy> LeavePolicies => Set<LeavePolicy>();
     public DbSet<LeavePolicyVersion> LeavePolicyVersions => Set<LeavePolicyVersion>();
+    public DbSet<WorkingCalendar> WorkingCalendars => Set<WorkingCalendar>();
+    public DbSet<WorkingCalendarWeekday> WorkingCalendarWeekdays => Set<WorkingCalendarWeekday>();
+    public DbSet<WorkingCalendarException> WorkingCalendarExceptions => Set<WorkingCalendarException>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

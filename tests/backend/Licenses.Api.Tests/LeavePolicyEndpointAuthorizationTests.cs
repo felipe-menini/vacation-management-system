@@ -15,6 +15,8 @@ namespace Licenses.Api.Tests;
 public sealed class LeavePolicyEndpointAuthorizationTests(WebApplicationFactory<Program> factory)
     : IClassFixture<WebApplicationFactory<Program>>
 {
+    private static readonly Guid TestWorkingCalendarId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+
     [Fact]
     public async Task LeavePoliciesGet_Returns401_WhenActorIsMissing()
     {
@@ -219,7 +221,7 @@ public sealed class LeavePolicyEndpointAuthorizationTests(WebApplicationFactory<
     }
 
     private static object VersionPayload(DateOnly? effectiveFrom = null, DateOnly? effectiveTo = null, bool consumesBalance = false, Guid? balanceBucketId = null) =>
-        new { effectiveFrom = effectiveFrom ?? new DateOnly(2026, 1, 1), effectiveTo, dayCountMode = "BUSINESS_DAYS", allowHalfDay = true, minimumNoticeDays = 7, noticeDayCountMode = "CALENDAR_DAYS", maximumRequestDays = 15, overlapBehavior = "BLOCK", consumesBalance, balanceBucketId };
+        new { effectiveFrom = effectiveFrom ?? new DateOnly(2026, 1, 1), effectiveTo, dayCountMode = "BUSINESS_DAYS", allowHalfDay = true, minimumNoticeDays = 7, noticeDayCountMode = "CALENDAR_DAYS", maximumRequestDays = 15, overlapBehavior = "BLOCK", consumesBalance, balanceBucketId, workingCalendarId = TestWorkingCalendarId };
 
     private static async Task<HttpResponseMessage> PublishCreatedVersionAsync(HttpClient client, Guid policyId, object payload)
     {
@@ -274,11 +276,14 @@ public sealed class LeavePolicyEndpointAuthorizationTests(WebApplicationFactory<
         private readonly List<LeaveType> _types = [];
         private readonly List<BalanceBucket> _buckets = [];
         private readonly List<OrgUnit> _orgs = [];
+        private readonly List<WorkingCalendar> _calendars = [TestCalendar()];
 
         public LeaveType AddLeaveType(string code, bool active) { var x = LeaveType.Create(code, code, null, 0, active, DateTime.UtcNow); _types.Add(x); return x; }
         public BalanceBucket AddBucket(string code, bool active) { var x = BalanceBucket.Create(code, code, null, BalanceBucketUnit.Day, active, DateTime.UtcNow); _buckets.Add(x); return x; }
         public LeavePolicy AddPolicy(Guid leaveTypeId, Guid? orgUnitId, bool appliesToDescendants, bool isActive) { var x = LeavePolicy.Create(leaveTypeId, orgUnitId, appliesToDescendants, isActive, DateTime.UtcNow); _policies.Add(x); return x; }
-        public LeavePolicyVersion AddVersion(Guid policyId, DateOnly effectiveFrom, DateOnly? effectiveTo) { var x = LeavePolicyVersion.CreateDraft(policyId, GetNextVersionNumberAsync(policyId, CancellationToken.None).Result, effectiveFrom, effectiveTo, PolicyDayCountMode.BusinessDays, true, 7, PolicyDayCountMode.CalendarDays, 15, PolicyOverlapBehavior.Block, false, null, DateTime.UtcNow); _versions.Add(x); return x; }
+        private static WorkingCalendar TestCalendar() { var x = WorkingCalendar.Create("TEST", "Test", null, true, StandardWeekdays(), DateTime.UtcNow); typeof(WorkingCalendar).GetProperty(nameof(WorkingCalendar.Id))!.SetValue(x, TestWorkingCalendarId); return x; }
+        private static Dictionary<DayOfWeek, bool> StandardWeekdays() => new() { [DayOfWeek.Sunday] = false, [DayOfWeek.Monday] = true, [DayOfWeek.Tuesday] = true, [DayOfWeek.Wednesday] = true, [DayOfWeek.Thursday] = true, [DayOfWeek.Friday] = true, [DayOfWeek.Saturday] = false };
+        public LeavePolicyVersion AddVersion(Guid policyId, DateOnly effectiveFrom, DateOnly? effectiveTo) { var x = LeavePolicyVersion.CreateDraft(policyId, GetNextVersionNumberAsync(policyId, CancellationToken.None).Result, effectiveFrom, effectiveTo, PolicyDayCountMode.BusinessDays, true, 7, PolicyDayCountMode.CalendarDays, 15, PolicyOverlapBehavior.Block, false, null, TestWorkingCalendarId, DateTime.UtcNow); _versions.Add(x); return x; }
 
         public Task<List<LeavePolicy>> ListPoliciesAsync(CancellationToken cancellationToken) => Task.FromResult(_policies.ToList());
         public Task<LeavePolicy?> GetPolicyAsync(Guid id, CancellationToken cancellationToken) => Task.FromResult(_policies.SingleOrDefault(x => x.Id == id));
@@ -293,8 +298,10 @@ public sealed class LeavePolicyEndpointAuthorizationTests(WebApplicationFactory<
         public Task AddVersionAsync(LeavePolicyVersion version, CancellationToken cancellationToken) { _versions.Add(version); return Task.CompletedTask; }
         public Task<LeaveType?> GetLeaveTypeAsync(Guid id, CancellationToken cancellationToken) => Task.FromResult(_types.SingleOrDefault(x => x.Id == id));
         public Task<BalanceBucket?> GetBalanceBucketAsync(Guid id, CancellationToken cancellationToken) => Task.FromResult(_buckets.SingleOrDefault(x => x.Id == id));
+        public Task<WorkingCalendar?> GetWorkingCalendarAsync(Guid id, CancellationToken cancellationToken) => Task.FromResult(_calendars.SingleOrDefault(x => x.Id == id));
         public Task<OrgUnit?> GetOrgUnitAsync(Guid id, CancellationToken cancellationToken) => Task.FromResult(_orgs.SingleOrDefault(x => x.Id == id));
         public Task<List<OrgUnit>> ListOrgUnitsAsync(CancellationToken cancellationToken) => Task.FromResult(_orgs.ToList());
         public Task SaveChangesAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 }
+

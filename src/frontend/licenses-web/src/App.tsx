@@ -9,11 +9,16 @@ type DevelopmentActor = { id: string; displayName: string; email: string; primar
 type LeaveType = { id: string; code: string; name: string; description: string | null; isActive: boolean; sortOrder: number };
 type BalanceBucket = { id: string; code: string; name: string; description: string | null; unit: string; isActive: boolean };
 type LeavePolicy = { id: string; leaveTypeId: string; leaveTypeCode: string; leaveTypeName: string; orgUnitId: string | null; orgUnitCode: string | null; orgUnitName: string | null; appliesToDescendants: boolean; isActive: boolean };
-type LeavePolicyVersion = { id: string; leavePolicyId: string; versionNumber: number; status: string; effectiveFrom: string; effectiveTo: string | null; dayCountMode: string; allowHalfDay: boolean; minimumNoticeDays: number | null; noticeDayCountMode: string; maximumRequestDays: number | null; overlapBehavior: string; consumesBalance: boolean; balanceBucketId: string | null; balanceBucketCode: string | null; balanceBucketName: string | null };
+type LeavePolicyVersion = { id: string; leavePolicyId: string; versionNumber: number; status: string; effectiveFrom: string; effectiveTo: string | null; dayCountMode: string; allowHalfDay: boolean; minimumNoticeDays: number | null; noticeDayCountMode: string; maximumRequestDays: number | null; overlapBehavior: string; consumesBalance: boolean; balanceBucketId: string | null; balanceBucketCode: string | null; balanceBucketName: string | null; workingCalendarId: string | null; workingCalendarCode: string | null; workingCalendarName: string | null };
 type ResolvePolicyResult = { found: boolean; policy: LeavePolicy | null; version: LeavePolicyVersion | null; reason: string | null };
+type WorkingCalendarWeekday = { dayOfWeek: string; isWorkingDay: boolean };
+type WorkingCalendarException = { id: string; workingCalendarId: string; date: string; name: string; isWorkingDay: boolean };
+type WorkingCalendar = { id: string; code: string; name: string; description: string | null; isActive: boolean; weekdays: WorkingCalendarWeekday[]; exceptions: WorkingCalendarException[] };
+type DayCalculationResult = { startDate: string; endDate: string; dayCountMode: string; workingCalendarId: string | null; calculatedDays: number; details: { date: string; isCounted: boolean }[] };
 
 type StatusCardProps = { label: string; status: HealthStatus };
 type CatalogKind = 'leave-types' | 'balance-buckets';
+const weekdayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 const endpointPrefix = '/api';
 const selectedActorStorageKey = 'licenses.devActorId';
@@ -63,7 +68,12 @@ function versionPayloadFromForm(data: FormData) {
     overlapBehavior: data.get('overlapBehavior'),
     consumesBalance,
     balanceBucketId: consumesBalance ? data.get('balanceBucketId') || null : null,
+    workingCalendarId: data.get('workingCalendarId') || null,
   };
+}
+
+function weekdayPayload(data: FormData): WorkingCalendarWeekday[] {
+  return weekdayNames.map((dayOfWeek) => ({ dayOfWeek, isWorkingDay: data.get(`weekday-${dayOfWeek}`) === 'on' }));
 }
 
 function StatusCard({ label, status }: StatusCardProps) {
@@ -105,6 +115,9 @@ export function App() {
   const [versionsByPolicy, setVersionsByPolicy] = useState<Record<string, LeavePolicyVersion[]>>({});
   const [policyMessage, setPolicyMessage] = useState<string | null>(null);
   const [resolvedPolicy, setResolvedPolicy] = useState<ResolvePolicyResult | null>(null);
+  const [calendars, setCalendars] = useState<WorkingCalendar[]>([]);
+  const [calendarMessage, setCalendarMessage] = useState<string | null>(null);
+  const [dayCalculation, setDayCalculation] = useState<DayCalculationResult | null>(null);
 
   const selectedActor = useMemo(() => actors.find((actor) => actor.id === selectedActorId) ?? null, [actors, selectedActorId]);
 
@@ -122,6 +135,10 @@ export function App() {
     const versionEntries = await Promise.all(list.map(async (policy) => [policy.id, await fetchJson<LeavePolicyVersion[]>(`/leave-policies/${policy.id}/versions`, actorId)] as const));
     setPolicies(list);
     setVersionsByPolicy(Object.fromEntries(versionEntries));
+  }
+
+  async function loadCalendars(actorId: string | null) {
+    setCalendars(await fetchJson<WorkingCalendar[]>('/working-calendars', actorId));
   }
 
   useEffect(() => {
@@ -210,9 +227,22 @@ export function App() {
       }
     }
 
+    async function loadCalendarData() {
+      try {
+        await loadCalendars(selectedActorId);
+        if (isMounted) setCalendarMessage(null);
+      } catch (error) {
+        if (isMounted) {
+          setCalendars([]);
+          setCalendarMessage(error instanceof Error ? error.message : 'Unable to load working calendars.');
+        }
+      }
+    }
+
     void loadAdminData();
     void loadCatalogData();
     void loadPolicyData();
+    void loadCalendarData();
 
     return () => {
       isMounted = false;
@@ -352,6 +382,73 @@ export function App() {
     }
   }
 
+  async function createCalendar(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    try {
+      await sendJson<WorkingCalendar>('/working-calendars', 'POST', {
+        code: data.get('code'),
+        name: data.get('name'),
+        description: data.get('description') || null,
+        weekdays: weekdayPayload(data),
+      }, selectedActorId);
+      event.currentTarget.reset();
+      await loadCalendars(selectedActorId);
+      setCalendarMessage('Working calendar saved.');
+    } catch (error) {
+      setCalendarMessage(error instanceof Error ? error.message : 'Unable to save working calendar.');
+    }
+  }
+
+  async function toggleCalendar(calendar: WorkingCalendar) {
+    try {
+      await sendJson<WorkingCalendar>(`/working-calendars/${calendar.id}`, 'PUT', {
+        name: calendar.name,
+        description: calendar.description,
+        isActive: !calendar.isActive,
+        weekdays: calendar.weekdays,
+      }, selectedActorId);
+      await loadCalendars(selectedActorId);
+      setCalendarMessage('Working calendar updated.');
+    } catch (error) {
+      setCalendarMessage(error instanceof Error ? error.message : 'Unable to update working calendar.');
+    }
+  }
+
+  async function createCalendarException(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    try {
+      await sendJson<WorkingCalendarException>(`/working-calendars/${data.get('workingCalendarId')}/exceptions`, 'POST', {
+        date: data.get('date'),
+        name: data.get('name'),
+        isWorkingDay: data.get('isWorkingDay') === 'on',
+      }, selectedActorId);
+      event.currentTarget.reset();
+      await loadCalendars(selectedActorId);
+      setCalendarMessage('Calendar exception saved.');
+    } catch (error) {
+      setCalendarMessage(error instanceof Error ? error.message : 'Unable to save calendar exception.');
+    }
+  }
+
+  async function calculateDays(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    try {
+      const params = new URLSearchParams({
+        mode: String(data.get('mode')),
+        startDate: String(data.get('startDate')),
+        endDate: String(data.get('endDate')),
+      });
+      const workingCalendarId = String(data.get('workingCalendarId') ?? '');
+      if (workingCalendarId) params.set('workingCalendarId', workingCalendarId);
+      setDayCalculation(await fetchJson<DayCalculationResult>(`/day-calculation?${params}`, selectedActorId));
+    } catch (error) {
+      setCalendarMessage(error instanceof Error ? error.message : 'Unable to calculate days.');
+    }
+  }
+
   return (
     <main className="page-shell">
       <section className="hero">
@@ -410,6 +507,69 @@ export function App() {
         </div>
       </section>
 
+      <section className="admin-panel" aria-label="Working calendar admin">
+        <div>
+          <p className="eyebrow">Working calendars</p>
+          <h2>Weekdays, holidays, and exceptions</h2>
+          <p className="muted">Weekends are not hardcoded: each calendar defines its own weekly working days, and dated exceptions override them.</p>
+          {calendarMessage ? <p className={calendarMessage.includes('failed') || calendarMessage.includes('403') || calendarMessage.includes('401') ? 'error' : 'muted'}>{calendarMessage}</p> : null}
+        </div>
+        <div className="admin-grid">
+          <form className="panel-card catalog-form" onSubmit={createCalendar}>
+            <h3>Create working calendar</h3>
+            <input name="code" placeholder="STANDARD_UY_DEV" required />
+            <input name="name" placeholder="Standard development calendar" required />
+            <input name="description" placeholder="Description" />
+            <div className="checkbox-grid">
+              {weekdayNames.map((day) => (
+                <label key={day}><input name={`weekday-${day}`} type="checkbox" defaultChecked={!['Saturday', 'Sunday'].includes(day)} /> {day}</label>
+              ))}
+            </div>
+            <button type="submit">Create calendar</button>
+          </form>
+          <form className="panel-card catalog-form" onSubmit={createCalendarException}>
+            <h3>Create dated exception</h3>
+            <select name="workingCalendarId" required>
+              <option value="">Select calendar</option>
+              {calendars.map((calendar) => <option key={calendar.id} value={calendar.id}>{calendar.code}</option>)}
+            </select>
+            <input name="date" type="date" required />
+            <input name="name" placeholder="Sample non-working weekday" required />
+            <label><input name="isWorkingDay" type="checkbox" /> Exceptional working day</label>
+            <button type="submit">Create exception</button>
+          </form>
+        </div>
+        <article className="panel-card">
+          <h3>Configured calendars</h3>
+          <div className="catalog-list">
+            {calendars.map((calendar) => (
+              <div className="policy-card" key={calendar.id}>
+                <strong>{calendar.code} - {calendar.name}</strong>
+                <span>{calendar.isActive ? 'Active' : 'Inactive'} · {calendar.description ?? 'No description'}</span>
+                <span>{calendar.weekdays.map((day) => `${day.dayOfWeek.slice(0, 3)}:${day.isWorkingDay ? 'work' : 'off'}`).join(' · ')}</span>
+                <div className="version-row">
+                  <span>Exceptions:</span>
+                  <span>{calendar.exceptions.length === 0 ? 'none' : calendar.exceptions.map((item) => `${item.date} ${item.name} (${item.isWorkingDay ? 'working' : 'non-working'})`).join(' · ')}</span>
+                </div>
+                <button type="button" onClick={() => toggleCalendar(calendar)}>Toggle active</button>
+              </div>
+            ))}
+          </div>
+        </article>
+        <form className="panel-card catalog-form" onSubmit={calculateDays}>
+          <h3>Day calculation inspector</h3>
+          <select name="mode" defaultValue="BUSINESS_DAYS"><option>BUSINESS_DAYS</option><option>CALENDAR_DAYS</option></select>
+          <select name="workingCalendarId">
+            <option value="">No working calendar</option>
+            {calendars.map((calendar) => <option key={calendar.id} value={calendar.id}>{calendar.code}</option>)}
+          </select>
+          <input name="startDate" type="date" required defaultValue="2026-08-10" />
+          <input name="endDate" type="date" required defaultValue="2026-08-14" />
+          <button type="submit">Calculate</button>
+          {dayCalculation ? <p className="muted">Calculated days: <strong>{dayCalculation.calculatedDays}</strong></p> : null}
+        </form>
+      </section>
+
       <section className="admin-panel" aria-label="Leave policy admin">
         <div>
           <p className="eyebrow">Leave policies</p>
@@ -443,6 +603,10 @@ export function App() {
             <label><input name="allowHalfDay" type="checkbox" /> Allow half day</label>
             <input name="minimumNoticeDays" type="number" min="0" placeholder="Minimum notice days" />
             <select name="noticeDayCountMode" defaultValue="CALENDAR_DAYS"><option>BUSINESS_DAYS</option><option>CALENDAR_DAYS</option></select>
+            <select name="workingCalendarId">
+              <option value="">No working calendar</option>
+              {calendars.filter((calendar) => calendar.isActive).map((calendar) => <option key={calendar.id} value={calendar.id}>{calendar.code}</option>)}
+            </select>
             <input name="maximumRequestDays" type="number" min="0.5" step="0.5" placeholder="Maximum request days" />
             <select name="overlapBehavior" defaultValue="BLOCK"><option>BLOCK</option><option>WARN</option><option>ALLOW</option></select>
             <label><input name="consumesBalance" type="checkbox" /> Consumes balance</label>
@@ -464,7 +628,7 @@ export function App() {
                   <div className="version-row" key={version.id}>
                     <span className={`badge ${version.status.toLowerCase()}`}>{version.status}</span>
                     <span>v{version.versionNumber}: {version.effectiveFrom} → {version.effectiveTo ?? 'open'}</span>
-                    <span>{version.dayCountMode}, half day: {version.allowHalfDay ? 'yes' : 'no'}, notice: {version.minimumNoticeDays ?? 'none'} {version.noticeDayCountMode}, max: {version.maximumRequestDays ?? 'none'}, overlap: {version.overlapBehavior}, balance: {version.consumesBalance ? version.balanceBucketCode : 'no'}</span>
+                    <span>{version.dayCountMode}, calendar: {version.workingCalendarCode ?? 'none'}, half day: {version.allowHalfDay ? 'yes' : 'no'}, notice: {version.minimumNoticeDays ?? 'none'} {version.noticeDayCountMode}, max: {version.maximumRequestDays ?? 'none'}, overlap: {version.overlapBehavior}, balance: {version.consumesBalance ? version.balanceBucketCode : 'no'}</span>
                     {version.status === 'DRAFT' ? (
                       <>
                         <details>
@@ -476,6 +640,10 @@ export function App() {
                             <label><input name="allowHalfDay" type="checkbox" defaultChecked={version.allowHalfDay} /> Allow half day</label>
                             <input name="minimumNoticeDays" type="number" min="0" placeholder="Minimum notice days" defaultValue={version.minimumNoticeDays ?? ''} />
                             <select name="noticeDayCountMode" defaultValue={version.noticeDayCountMode}><option>BUSINESS_DAYS</option><option>CALENDAR_DAYS</option></select>
+                            <select name="workingCalendarId" defaultValue={version.workingCalendarId ?? ''}>
+                              <option value="">No working calendar</option>
+                              {calendars.filter((calendar) => calendar.isActive || calendar.id === version.workingCalendarId).map((calendar) => <option key={calendar.id} value={calendar.id}>{calendar.code}</option>)}
+                            </select>
                             <input name="maximumRequestDays" type="number" min="0.5" step="0.5" placeholder="Maximum request days" defaultValue={version.maximumRequestDays ?? ''} />
                             <select name="overlapBehavior" defaultValue={version.overlapBehavior}><option>BLOCK</option><option>WARN</option><option>ALLOW</option></select>
                             <label><input name="consumesBalance" type="checkbox" defaultChecked={version.consumesBalance} /> Consumes balance</label>

@@ -61,9 +61,11 @@ public sealed class LeavePolicyService(ILeavePolicyRepository repository, TimePr
     public async Task<LeavePolicyVersionDto> CreateVersionAsync(Guid policyId, CreateLeavePolicyVersionCommand command, CancellationToken cancellationToken)
     {
         var policy = await repository.GetPolicyAsync(policyId, cancellationToken) ?? throw new InvalidOperationException("Leave policy does not exist.");
-        await ValidateRuleReferencesAsync(policy, command.ConsumesBalance, command.BalanceBucketId, requireActiveForPublish: false, cancellationToken);
+        var dayCountMode = ParseDayCountMode(command.DayCountMode);
+        var noticeDayCountMode = ParseDayCountMode(command.NoticeDayCountMode);
+        await ValidateRuleReferencesAsync(policy, dayCountMode, noticeDayCountMode, command.ConsumesBalance, command.BalanceBucketId, command.WorkingCalendarId, requireActiveForPublish: false, cancellationToken);
         var nextVersion = await repository.GetNextVersionNumberAsync(policyId, cancellationToken);
-        var version = LeavePolicyVersion.CreateDraft(policyId, nextVersion, command.EffectiveFrom, command.EffectiveTo, ParseDayCountMode(command.DayCountMode), command.AllowHalfDay, command.MinimumNoticeDays, ParseDayCountMode(command.NoticeDayCountMode), command.MaximumRequestDays, ParseOverlapBehavior(command.OverlapBehavior), command.ConsumesBalance, command.BalanceBucketId, UtcNow());
+        var version = LeavePolicyVersion.CreateDraft(policyId, nextVersion, command.EffectiveFrom, command.EffectiveTo, dayCountMode, command.AllowHalfDay, command.MinimumNoticeDays, noticeDayCountMode, command.MaximumRequestDays, ParseOverlapBehavior(command.OverlapBehavior), command.ConsumesBalance, command.BalanceBucketId, command.WorkingCalendarId, UtcNow());
         await repository.AddVersionAsync(version, cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
         return (await ToVersionDtosAsync([version], cancellationToken)).Single();
@@ -74,8 +76,10 @@ public sealed class LeavePolicyService(ILeavePolicyRepository repository, TimePr
         var version = await repository.GetVersionAsync(id, cancellationToken);
         if (version is null) return null;
         var policy = await repository.GetPolicyAsync(version.LeavePolicyId, cancellationToken) ?? throw new InvalidOperationException("Leave policy does not exist.");
-        await ValidateRuleReferencesAsync(policy, command.ConsumesBalance, command.BalanceBucketId, requireActiveForPublish: false, cancellationToken);
-        version.UpdateDraft(command.EffectiveFrom, command.EffectiveTo, ParseDayCountMode(command.DayCountMode), command.AllowHalfDay, command.MinimumNoticeDays, ParseDayCountMode(command.NoticeDayCountMode), command.MaximumRequestDays, ParseOverlapBehavior(command.OverlapBehavior), command.ConsumesBalance, command.BalanceBucketId, UtcNow());
+        var dayCountMode = ParseDayCountMode(command.DayCountMode);
+        var noticeDayCountMode = ParseDayCountMode(command.NoticeDayCountMode);
+        await ValidateRuleReferencesAsync(policy, dayCountMode, noticeDayCountMode, command.ConsumesBalance, command.BalanceBucketId, command.WorkingCalendarId, requireActiveForPublish: false, cancellationToken);
+        version.UpdateDraft(command.EffectiveFrom, command.EffectiveTo, dayCountMode, command.AllowHalfDay, command.MinimumNoticeDays, noticeDayCountMode, command.MaximumRequestDays, ParseOverlapBehavior(command.OverlapBehavior), command.ConsumesBalance, command.BalanceBucketId, command.WorkingCalendarId, UtcNow());
         await repository.SaveChangesAsync(cancellationToken);
         return (await ToVersionDtosAsync([version], cancellationToken)).Single();
     }
@@ -86,7 +90,7 @@ public sealed class LeavePolicyService(ILeavePolicyRepository repository, TimePr
         if (version is null) return null;
         var policy = await repository.GetPolicyAsync(version.LeavePolicyId, cancellationToken) ?? throw new InvalidOperationException("Leave policy does not exist.");
         if (!policy.IsActive) throw new InvalidOperationException("Inactive policies cannot publish new versions.");
-        await ValidateRuleReferencesAsync(policy, version.ConsumesBalance, version.BalanceBucketId, requireActiveForPublish: true, cancellationToken);
+        await ValidateRuleReferencesAsync(policy, version.DayCountMode, version.NoticeDayCountMode, version.ConsumesBalance, version.BalanceBucketId, version.WorkingCalendarId, requireActiveForPublish: true, cancellationToken);
         if (await repository.HasOverlappingPublishedVersionAsync(version.LeavePolicyId, version.EffectiveFrom, version.EffectiveTo, version.Id, cancellationToken)) throw new InvalidOperationException("Published policy effective periods cannot overlap.");
         version.Publish(UtcNow());
         await repository.SaveChangesAsync(cancellationToken);
@@ -109,10 +113,16 @@ public sealed class LeavePolicyService(ILeavePolicyRepository repository, TimePr
         return new(true, (await ToPolicyDtosAsync([selectedPolicy], cancellationToken)).Single(), (await ToVersionDtosAsync([selectedVersion], cancellationToken)).Single(), null);
     }
 
-    private async Task ValidateRuleReferencesAsync(LeavePolicy policy, bool consumesBalance, Guid? balanceBucketId, bool requireActiveForPublish, CancellationToken cancellationToken)
+    private async Task ValidateRuleReferencesAsync(LeavePolicy policy, PolicyDayCountMode dayCountMode, PolicyDayCountMode noticeDayCountMode, bool consumesBalance, Guid? balanceBucketId, Guid? workingCalendarId, bool requireActiveForPublish, CancellationToken cancellationToken)
     {
         var leaveType = await repository.GetLeaveTypeAsync(policy.LeaveTypeId, cancellationToken) ?? throw new InvalidOperationException("Leave type does not exist.");
         if (requireActiveForPublish && !leaveType.IsActive) throw new InvalidOperationException("Inactive leave types cannot receive newly published policy versions.");
+        if (dayCountMode == PolicyDayCountMode.BusinessDays || noticeDayCountMode == PolicyDayCountMode.BusinessDays)
+        {
+            if (workingCalendarId is not { } requiredCalendarId) throw new InvalidOperationException("WorkingCalendarId is required when day count or notice mode uses BUSINESS_DAYS.");
+            var calendar = await repository.GetWorkingCalendarAsync(requiredCalendarId, cancellationToken) ?? throw new InvalidOperationException("Working calendar does not exist.");
+            if (requireActiveForPublish && !calendar.IsActive) throw new InvalidOperationException("Inactive working calendars cannot be used by newly published policy versions.");
+        }
         if (!consumesBalance)
         {
             if (balanceBucketId is not null) throw new InvalidOperationException("BalanceBucketId must be empty when ConsumesBalance is false.");
@@ -136,7 +146,9 @@ public sealed class LeavePolicyService(ILeavePolicyRepository repository, TimePr
     {
         var bucketIds = versions.Where(x => x.BalanceBucketId is not null).Select(x => x.BalanceBucketId!.Value).Distinct().ToList();
         var buckets = (await Task.WhenAll(bucketIds.Select(x => repository.GetBalanceBucketAsync(x, cancellationToken)))).Where(x => x is not null).ToDictionary(x => x!.Id, x => x!);
-        return versions.Select(x => new LeavePolicyVersionDto(x.Id, x.LeavePolicyId, x.VersionNumber, ToStatusCode(x.Status), x.EffectiveFrom, x.EffectiveTo, ToDayCountCode(x.DayCountMode), x.AllowHalfDay, x.MinimumNoticeDays, ToDayCountCode(x.NoticeDayCountMode), x.MaximumRequestDays, ToOverlapCode(x.OverlapBehavior), x.ConsumesBalance, x.BalanceBucketId, x.BalanceBucketId is null ? null : buckets[x.BalanceBucketId.Value].Code, x.BalanceBucketId is null ? null : buckets[x.BalanceBucketId.Value].Name, x.CreatedAtUtc, x.UpdatedAtUtc, x.PublishedAtUtc)).ToList();
+        var calendarIds = versions.Where(x => x.WorkingCalendarId is not null).Select(x => x.WorkingCalendarId!.Value).Distinct().ToList();
+        var calendars = (await Task.WhenAll(calendarIds.Select(x => repository.GetWorkingCalendarAsync(x, cancellationToken)))).Where(x => x is not null).ToDictionary(x => x!.Id, x => x!);
+        return versions.Select(x => new LeavePolicyVersionDto(x.Id, x.LeavePolicyId, x.VersionNumber, ToStatusCode(x.Status), x.EffectiveFrom, x.EffectiveTo, ToDayCountCode(x.DayCountMode), x.AllowHalfDay, x.MinimumNoticeDays, ToDayCountCode(x.NoticeDayCountMode), x.MaximumRequestDays, ToOverlapCode(x.OverlapBehavior), x.ConsumesBalance, x.BalanceBucketId, x.BalanceBucketId is null ? null : buckets[x.BalanceBucketId.Value].Code, x.BalanceBucketId is null ? null : buckets[x.BalanceBucketId.Value].Name, x.WorkingCalendarId, x.WorkingCalendarId is null ? null : calendars[x.WorkingCalendarId.Value].Code, x.WorkingCalendarId is null ? null : calendars[x.WorkingCalendarId.Value].Name, x.CreatedAtUtc, x.UpdatedAtUtc, x.PublishedAtUtc)).ToList();
     }
 
     private static Func<LeavePolicyVersion, bool> IsPublishedEffective(DateOnly date) => x => x.Status == LeavePolicyVersionStatus.Published && x.EffectiveFrom <= date && (x.EffectiveTo is null || x.EffectiveTo >= date);

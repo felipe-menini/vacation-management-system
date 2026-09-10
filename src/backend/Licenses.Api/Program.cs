@@ -30,6 +30,7 @@ builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddScoped<OrganizationService>();
 builder.Services.AddScoped<LeaveCatalogService>();
 builder.Services.AddScoped<LeavePolicyService>();
+builder.Services.AddScoped<WorkingCalendarService>();
 
 var app = builder.Build();
 
@@ -58,6 +59,7 @@ app.MapDevelopmentEndpoints();
 app.MapOrganizationEndpoints();
 app.MapLeaveCatalogEndpoints();
 app.MapLeavePolicyEndpoints();
+app.MapWorkingCalendarEndpoints();
 
 app.Run();
 
