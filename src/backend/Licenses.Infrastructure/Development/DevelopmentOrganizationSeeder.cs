@@ -45,10 +45,10 @@ public static class DevelopmentOrganizationSeeder
         var hrRole = await EnsureRoleAsync(db, "HR", "HR", "Organization-wide HR administration.", now, cancellationToken);
         var techAdmin = await EnsureRoleAsync(db, "TECH_ADMIN", "Technical Administrator", "Technical platform administration without default HR authority.", now, cancellationToken);
 
-        await EnsureRolePermissionsAsync(db, employee, [PermissionCodes.LeaveCatalogRead, PermissionCodes.LeavePoliciesRead, PermissionCodes.LeaveCalendarsRead], permissions, cancellationToken);
-        await EnsureRolePermissionsAsync(db, supervisor, [PermissionCodes.OrgUnitsRead, PermissionCodes.OrgUsersRead, PermissionCodes.OrgAssignmentsRead, PermissionCodes.LeaveCatalogRead, PermissionCodes.LeavePoliciesRead, PermissionCodes.LeaveCalendarsRead], permissions, cancellationToken);
-        await EnsureRolePermissionsAsync(db, manager, [PermissionCodes.OrgUnitsRead, PermissionCodes.OrgUnitsManage, PermissionCodes.OrgUsersRead, PermissionCodes.OrgUsersManage, PermissionCodes.OrgAssignmentsRead, PermissionCodes.OrgAssignmentsManage, PermissionCodes.LeaveCatalogRead, PermissionCodes.LeavePoliciesRead, PermissionCodes.LeaveCalendarsRead], permissions, cancellationToken);
-        await EnsureRolePermissionsAsync(db, hrRole, [PermissionCodes.OrgUnitsRead, PermissionCodes.OrgUnitsManage, PermissionCodes.OrgUsersRead, PermissionCodes.OrgUsersManage, PermissionCodes.OrgAssignmentsRead, PermissionCodes.OrgAssignmentsManage, PermissionCodes.LeaveCatalogRead, PermissionCodes.LeaveCatalogManage, PermissionCodes.LeavePoliciesRead, PermissionCodes.LeavePoliciesManage, PermissionCodes.LeaveCalendarsRead, PermissionCodes.LeaveCalendarsManage], permissions, cancellationToken);
+        await EnsureRolePermissionsAsync(db, employee, [PermissionCodes.LeaveCatalogRead, PermissionCodes.LeavePoliciesRead, PermissionCodes.LeaveCalendarsRead, PermissionCodes.LeaveBalancesReadSelf], permissions, cancellationToken);
+        await EnsureRolePermissionsAsync(db, supervisor, [PermissionCodes.OrgUnitsRead, PermissionCodes.OrgUsersRead, PermissionCodes.OrgAssignmentsRead, PermissionCodes.LeaveCatalogRead, PermissionCodes.LeavePoliciesRead, PermissionCodes.LeaveCalendarsRead, PermissionCodes.LeaveBalancesReadSelf, PermissionCodes.LeaveBalancesRead], permissions, cancellationToken);
+        await EnsureRolePermissionsAsync(db, manager, [PermissionCodes.OrgUnitsRead, PermissionCodes.OrgUnitsManage, PermissionCodes.OrgUsersRead, PermissionCodes.OrgUsersManage, PermissionCodes.OrgAssignmentsRead, PermissionCodes.OrgAssignmentsManage, PermissionCodes.LeaveCatalogRead, PermissionCodes.LeavePoliciesRead, PermissionCodes.LeaveCalendarsRead, PermissionCodes.LeaveBalancesReadSelf, PermissionCodes.LeaveBalancesRead], permissions, cancellationToken);
+        await EnsureRolePermissionsAsync(db, hrRole, [PermissionCodes.OrgUnitsRead, PermissionCodes.OrgUnitsManage, PermissionCodes.OrgUsersRead, PermissionCodes.OrgUsersManage, PermissionCodes.OrgAssignmentsRead, PermissionCodes.OrgAssignmentsManage, PermissionCodes.LeaveCatalogRead, PermissionCodes.LeaveCatalogManage, PermissionCodes.LeavePoliciesRead, PermissionCodes.LeavePoliciesManage, PermissionCodes.LeaveCalendarsRead, PermissionCodes.LeaveCalendarsManage, PermissionCodes.LeaveBalancesReadSelf, PermissionCodes.LeaveBalancesRead, PermissionCodes.LeaveBalancesManage], permissions, cancellationToken);
         await EnsureRolePermissionsAsync(db, techAdmin, [PermissionCodes.OrgUnitsRead], permissions, cancellationToken);
 
         await EnsureRoleScopeAssignmentAsync(db, felipe.Id, manager.Id, it.Id, includeDescendants: true, now, cancellationToken);
@@ -62,6 +62,7 @@ public static class DevelopmentOrganizationSeeder
         await db.SaveChangesAsync(cancellationToken);
         var developmentCalendar = await EnsureWorkingCalendarSeedAsync(db, now, cancellationToken);
         await EnsureLeavePolicySeedAsync(db, now, cancellationToken);
+        await EnsureDevelopmentBalanceSeedAsync(db, now, cancellationToken);
 
         await db.SaveChangesAsync(cancellationToken);
     }
@@ -111,9 +112,11 @@ public static class DevelopmentOrganizationSeeder
             [PermissionCodes.LeavePoliciesRead] = "Read leave policy configuration.",
             [PermissionCodes.LeavePoliciesManage] = "Create, update, and publish leave policy configuration.",
             [PermissionCodes.LeaveCalendarsRead] = "Read working calendar configuration.",
-            [PermissionCodes.LeaveCalendarsManage] = "Create and update working calendar configuration."
+            [PermissionCodes.LeaveCalendarsManage] = "Create and update working calendar configuration.",
+            [PermissionCodes.LeaveBalancesReadSelf] = "Read own leave balances.",
+            [PermissionCodes.LeaveBalancesRead] = "Read balances inside authorized organizational scope.",
+            [PermissionCodes.LeaveBalancesManage] = "Manage balances inside authorized organizational scope."
         };
-
         foreach (var item in catalog)
         {
             if (!await db.Permissions.AnyAsync(x => x.Code == item.Key, cancellationToken))
@@ -216,7 +219,33 @@ public static class DevelopmentOrganizationSeeder
         await db.BalanceBuckets.AddAsync(BalanceBucket.Create(code, name, description, unit, isActive: true, now), cancellationToken);
     }
 
-    private static async Task EnsureLeavePolicySeedAsync(ApplicationDbContext db, DateTime now, CancellationToken cancellationToken)
+
+    private static async Task EnsureDevelopmentBalanceSeedAsync(ApplicationDbContext db, DateTime now, CancellationToken cancellationToken)
+    {
+        var felipe = await db.Users.SingleAsync(x => x.Email == "FELIPE@EXAMPLE.TEST", cancellationToken);
+        var supportUser = await db.Users.SingleAsync(x => x.Email == "SUPPORT.USER@EXAMPLE.TEST", cancellationToken);
+        var vacation = await db.BalanceBuckets.SingleAsync(x => x.Code == "VACATION_DAYS", cancellationToken);
+        var medicalExam = await db.BalanceBuckets.SingleAsync(x => x.Code == "MEDICAL_EXAM_DAYS", cancellationToken);
+
+        await EnsureDevelopmentGrantAsync(db, felipe.Id, vacation.Id, Guid.Parse("06000000-0000-0000-0000-000000000001"), 20m, "Development sample grant for UI demonstration only.", now, cancellationToken);
+        await EnsureDevelopmentGrantAsync(db, felipe.Id, medicalExam.Id, Guid.Parse("06000000-0000-0000-0000-000000000002"), 2m, "Development sample medical exam grant for UI demonstration only.", now, cancellationToken);
+        await EnsureDevelopmentGrantAsync(db, supportUser.Id, vacation.Id, Guid.Parse("06000000-0000-0000-0000-000000000003"), 12.5m, "Development sample grant for scoped balance visibility.", now, cancellationToken);
+    }
+
+    private static async Task EnsureDevelopmentGrantAsync(ApplicationDbContext db, Guid userId, Guid bucketId, Guid operationId, decimal amount, string reason, DateTime now, CancellationToken cancellationToken)
+    {
+        if (await db.BalanceLedgerEntries.AnyAsync(x => x.OperationId == operationId, cancellationToken)) return;
+        var account = await db.BalanceAccounts.FirstOrDefaultAsync(x => x.UserId == userId && x.BalanceBucketId == bucketId, cancellationToken);
+        if (account is null)
+        {
+            account = BalanceAccount.Create(userId, bucketId, now);
+            await db.BalanceAccounts.AddAsync(account, cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        var (availableDelta, reservedDelta) = BalanceLedgerEntry.GetDeltas(BalanceLedgerEntryType.Grant, amount);
+        await db.BalanceLedgerEntries.AddAsync(BalanceLedgerEntry.Create(account.Id, operationId, BalanceLedgerEntryType.Grant, availableDelta, reservedDelta, reason, createdByUserId: null, now), cancellationToken);
+    }    private static async Task EnsureLeavePolicySeedAsync(ApplicationDbContext db, DateTime now, CancellationToken cancellationToken)
     {
         var vacation = await db.LeaveTypes.SingleAsync(x => x.Code == "VACATION", cancellationToken);
         var medical = await db.LeaveTypes.SingleAsync(x => x.Code == "MEDICAL", cancellationToken);
@@ -301,3 +330,7 @@ public static class DevelopmentOrganizationSeeder
         await db.SaveChangesAsync(cancellationToken);
     }
 }
+
+
+
+

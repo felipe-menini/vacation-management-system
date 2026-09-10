@@ -57,3 +57,9 @@ Future leave requests must persist the exact `leave_policy_versions.id` used dur
 EP-05 adds `licenses.working_calendars`, `licenses.working_calendar_weekdays`, and `licenses.working_calendar_exceptions`. Business dates are persisted as PostgreSQL `date` via `DateOnly`; UTC timestamps are only used for technical audit-style creation/update fields.
 
 Persistence guarantees include unique normalized calendar codes, one weekday row per calendar/day, unique exception date per calendar, controlled weekday values, and conservative foreign keys. `licenses.leave_policy_versions.working_calendar_id` is nullable, but a check constraint requires it when either policy day-count mode uses `BUSINESS_DAYS`.
+
+## Implemented balance ledger persistence
+
+EP-06 adds `licenses.balance_accounts` and `licenses.balance_ledger_entries`. `balance_accounts` enforces one account per `(user_id, balance_bucket_id)`. `balance_ledger_entries` enforces unique `operation_id`, controlled entry types, semantic delta checks, and a PostgreSQL trigger that rejects direct `UPDATE` and `DELETE`.
+
+Balance mutation transactions cover account acquisition/creation, idempotency check, row-level account locking, balance derivation, invariant validation, and ledger insertion. There are no mutable current-balance columns.

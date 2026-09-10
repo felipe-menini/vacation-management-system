@@ -75,3 +75,15 @@ EP-05 adds:
 | `leave.calendars.manage` | Create/update working calendars and dated exceptions. |
 
 Development seed grants calendar read to Employee, Supervisor, Manager, and HR. HR receives calendar manage. Technical Administrator does not receive calendar manage by default because working-calendar configuration is a business/HR capability, not automatic technical administration.
+
+## Implemented balance permissions
+
+EP-06 adds:
+
+| Permission | Description |
+| --- | --- |
+| `leave.balances.read.self` | Read own balances. |
+| `leave.balances.read` | Read balances within organizational scope. |
+| `leave.balances.manage` | Grant, adjust, and expire balances within organizational scope. |
+
+Development seed grants self-read to Employee, Supervisor, Manager, and HR. Supervisor and Manager receive scoped balance read. HR receives scoped balance read and manage. Technical Administrator receives no automatic business balance permission.
