@@ -15,10 +15,10 @@ public sealed class LeavePolicyDomainTests
     public void DraftVersionCanBeEditedAndPublishedVersionCannot()
     {
         var version = Draft();
-        version.UpdateDraft(new DateOnly(2026, 1, 2), null, PolicyDayCountMode.CalendarDays, false, 0, PolicyDayCountMode.CalendarDays, null, PolicyOverlapBehavior.Allow, false, null, DateTime.UtcNow);
+        version.UpdateDraft(new DateOnly(2026, 1, 2), null, PolicyDayCountMode.CalendarDays, false, 0, PolicyDayCountMode.CalendarDays, null, PolicyOverlapBehavior.Allow, false, null, null, DateTime.UtcNow);
         version.Publish(DateTime.UtcNow);
         Assert.Equal(LeavePolicyVersionStatus.Published, version.Status);
-        Assert.Throws<InvalidOperationException>(() => version.UpdateDraft(new DateOnly(2026, 1, 3), null, PolicyDayCountMode.CalendarDays, false, null, PolicyDayCountMode.CalendarDays, null, PolicyOverlapBehavior.Allow, false, null, DateTime.UtcNow));
+        Assert.Throws<InvalidOperationException>(() => version.UpdateDraft(new DateOnly(2026, 1, 3), null, PolicyDayCountMode.CalendarDays, false, null, PolicyDayCountMode.CalendarDays, null, PolicyOverlapBehavior.Allow, false, null, null, DateTime.UtcNow));
     }
 
     [Fact]
@@ -29,9 +29,11 @@ public sealed class LeavePolicyDomainTests
         Assert.Throws<ArgumentOutOfRangeException>(() => Draft(maximumRequestDays: 0));
         Assert.Throws<InvalidOperationException>(() => Draft(consumesBalance: true, balanceBucketId: null));
         Assert.Throws<InvalidOperationException>(() => Draft(consumesBalance: false, balanceBucketId: Guid.NewGuid()));
-        Assert.Throws<ArgumentOutOfRangeException>(() => LeavePolicyVersion.CreateDraft(Guid.NewGuid(), 0, new DateOnly(2026, 1, 1), null, PolicyDayCountMode.BusinessDays, true, null, PolicyDayCountMode.CalendarDays, null, PolicyOverlapBehavior.Block, false, null, DateTime.UtcNow));
+        Assert.Throws<InvalidOperationException>(() => LeavePolicyVersion.CreateDraft(Guid.NewGuid(), 1, new DateOnly(2026, 1, 1), null, PolicyDayCountMode.BusinessDays, true, null, PolicyDayCountMode.CalendarDays, null, PolicyOverlapBehavior.Block, false, null, null, DateTime.UtcNow));
+        Assert.Throws<ArgumentOutOfRangeException>(() => LeavePolicyVersion.CreateDraft(Guid.NewGuid(), 0, new DateOnly(2026, 1, 1), null, PolicyDayCountMode.BusinessDays, true, null, PolicyDayCountMode.CalendarDays, null, PolicyOverlapBehavior.Block, false, null, null, DateTime.UtcNow));
     }
 
     private static LeavePolicyVersion Draft(DateOnly? effectiveFrom = null, DateOnly? effectiveTo = null, int? minimumNoticeDays = null, decimal? maximumRequestDays = 1, bool consumesBalance = false, Guid? balanceBucketId = null) =>
-        LeavePolicyVersion.CreateDraft(Guid.NewGuid(), 1, effectiveFrom ?? new DateOnly(2026, 1, 1), effectiveTo, PolicyDayCountMode.BusinessDays, true, minimumNoticeDays, PolicyDayCountMode.CalendarDays, maximumRequestDays, PolicyOverlapBehavior.Block, consumesBalance, balanceBucketId, DateTime.UtcNow);
+        LeavePolicyVersion.CreateDraft(Guid.NewGuid(), 1, effectiveFrom ?? new DateOnly(2026, 1, 1), effectiveTo, PolicyDayCountMode.BusinessDays, true, minimumNoticeDays, PolicyDayCountMode.CalendarDays, maximumRequestDays, PolicyOverlapBehavior.Block, consumesBalance, balanceBucketId, Guid.NewGuid(), DateTime.UtcNow);
 }
+

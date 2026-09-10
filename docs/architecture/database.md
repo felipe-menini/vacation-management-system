@@ -51,3 +51,9 @@ Index expected query paths by user, organizational unit, leave state, leave date
 EP-04 adds `licenses.leave_policies` and `licenses.leave_policy_versions`. Policy effective dates use PostgreSQL `date` via `DateOnly`. Database constraints validate enum values, effective ranges, balance-bucket consistency, positive version numbers, non-negative notice, and positive maximum request days. PostgreSQL also protects non-overlapping published periods per policy with an exclusion constraint.
 
 Future leave requests must persist the exact `leave_policy_versions.id` used during evaluation. They must not store only a leave type and date and re-resolve later, because policy publications are historical boundaries.
+
+## Implemented working-calendar persistence
+
+EP-05 adds `licenses.working_calendars`, `licenses.working_calendar_weekdays`, and `licenses.working_calendar_exceptions`. Business dates are persisted as PostgreSQL `date` via `DateOnly`; UTC timestamps are only used for technical audit-style creation/update fields.
+
+Persistence guarantees include unique normalized calendar codes, one weekday row per calendar/day, unique exception date per calendar, controlled weekday values, and conservative foreign keys. `licenses.leave_policy_versions.working_calendar_id` is nullable, but a check constraint requires it when either policy day-count mode uses `BUSINESS_DAYS`.

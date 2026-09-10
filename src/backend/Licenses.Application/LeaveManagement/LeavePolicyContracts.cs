@@ -7,9 +7,9 @@ public sealed record LeavePolicyDto(Guid Id, Guid LeaveTypeId, string LeaveTypeC
 public sealed record CreateLeavePolicyCommand(Guid LeaveTypeId, Guid? OrgUnitId, bool AppliesToDescendants, bool? IsActive);
 public sealed record UpdateLeavePolicyCommand(Guid? OrgUnitId, bool AppliesToDescendants, bool IsActive);
 
-public sealed record LeavePolicyVersionDto(Guid Id, Guid LeavePolicyId, int VersionNumber, string Status, DateOnly EffectiveFrom, DateOnly? EffectiveTo, string DayCountMode, bool AllowHalfDay, int? MinimumNoticeDays, string NoticeDayCountMode, decimal? MaximumRequestDays, string OverlapBehavior, bool ConsumesBalance, Guid? BalanceBucketId, string? BalanceBucketCode, string? BalanceBucketName, DateTime CreatedAtUtc, DateTime UpdatedAtUtc, DateTime? PublishedAtUtc);
-public sealed record CreateLeavePolicyVersionCommand(DateOnly EffectiveFrom, DateOnly? EffectiveTo, string DayCountMode, bool AllowHalfDay, int? MinimumNoticeDays, string NoticeDayCountMode, decimal? MaximumRequestDays, string OverlapBehavior, bool ConsumesBalance, Guid? BalanceBucketId);
-public sealed record UpdateLeavePolicyVersionCommand(DateOnly EffectiveFrom, DateOnly? EffectiveTo, string DayCountMode, bool AllowHalfDay, int? MinimumNoticeDays, string NoticeDayCountMode, decimal? MaximumRequestDays, string OverlapBehavior, bool ConsumesBalance, Guid? BalanceBucketId);
+public sealed record LeavePolicyVersionDto(Guid Id, Guid LeavePolicyId, int VersionNumber, string Status, DateOnly EffectiveFrom, DateOnly? EffectiveTo, string DayCountMode, bool AllowHalfDay, int? MinimumNoticeDays, string NoticeDayCountMode, decimal? MaximumRequestDays, string OverlapBehavior, bool ConsumesBalance, Guid? BalanceBucketId, string? BalanceBucketCode, string? BalanceBucketName, Guid? WorkingCalendarId, string? WorkingCalendarCode, string? WorkingCalendarName, DateTime CreatedAtUtc, DateTime UpdatedAtUtc, DateTime? PublishedAtUtc);
+public sealed record CreateLeavePolicyVersionCommand(DateOnly EffectiveFrom, DateOnly? EffectiveTo, string DayCountMode, bool AllowHalfDay, int? MinimumNoticeDays, string NoticeDayCountMode, decimal? MaximumRequestDays, string OverlapBehavior, bool ConsumesBalance, Guid? BalanceBucketId, Guid? WorkingCalendarId);
+public sealed record UpdateLeavePolicyVersionCommand(DateOnly EffectiveFrom, DateOnly? EffectiveTo, string DayCountMode, bool AllowHalfDay, int? MinimumNoticeDays, string NoticeDayCountMode, decimal? MaximumRequestDays, string OverlapBehavior, bool ConsumesBalance, Guid? BalanceBucketId, Guid? WorkingCalendarId);
 public sealed record ResolveLeavePolicyResultDto(bool Found, LeavePolicyDto? Policy, LeavePolicyVersionDto? Version, string? Reason);
 
 public interface ILeavePolicyRepository
@@ -27,6 +27,7 @@ public interface ILeavePolicyRepository
     Task AddVersionAsync(LeavePolicyVersion version, CancellationToken cancellationToken);
     Task<LeaveType?> GetLeaveTypeAsync(Guid id, CancellationToken cancellationToken);
     Task<BalanceBucket?> GetBalanceBucketAsync(Guid id, CancellationToken cancellationToken);
+    Task<WorkingCalendar?> GetWorkingCalendarAsync(Guid id, CancellationToken cancellationToken);
     Task<OrgUnit?> GetOrgUnitAsync(Guid id, CancellationToken cancellationToken);
     Task<List<OrgUnit>> ListOrgUnitsAsync(CancellationToken cancellationToken);
     Task SaveChangesAsync(CancellationToken cancellationToken);

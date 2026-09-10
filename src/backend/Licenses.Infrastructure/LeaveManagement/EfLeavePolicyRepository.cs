@@ -51,6 +51,7 @@ public sealed class EfLeavePolicyRepository(ApplicationDbContext dbContext) : IL
     public Task AddVersionAsync(LeavePolicyVersion version, CancellationToken cancellationToken) => dbContext.LeavePolicyVersions.AddAsync(version, cancellationToken).AsTask();
     public Task<LeaveType?> GetLeaveTypeAsync(Guid id, CancellationToken cancellationToken) => dbContext.LeaveTypes.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
     public Task<BalanceBucket?> GetBalanceBucketAsync(Guid id, CancellationToken cancellationToken) => dbContext.BalanceBuckets.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+    public Task<WorkingCalendar?> GetWorkingCalendarAsync(Guid id, CancellationToken cancellationToken) => dbContext.WorkingCalendars.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
     public Task<OrgUnit?> GetOrgUnitAsync(Guid id, CancellationToken cancellationToken) => dbContext.OrgUnits.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
     public Task<List<OrgUnit>> ListOrgUnitsAsync(CancellationToken cancellationToken) => dbContext.OrgUnits.AsNoTracking().ToListAsync(cancellationToken);
     public Task SaveChangesAsync(CancellationToken cancellationToken) => dbContext.SaveChangesAsync(cancellationToken);

@@ -86,6 +86,7 @@ h2, h3 { margin: 0 0 1rem; }
 .catalog-form { display: grid; gap: 0.75rem; }
 .catalog-form input, .catalog-form select { width: 100%; padding: 0.7rem 0.8rem; border: 1px solid #b8c7dc; border-radius: 12px; color: #172033; background: #fff; }
 .inline-form { margin-top: 0.75rem; }
+.checkbox-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.45rem; color: #526078; }
 .policy-card { display: grid; gap: 0.6rem; padding: 1rem; border: 1px solid #eef2f8; border-radius: 16px; }
 .version-row { display: grid; gap: 0.45rem; padding: 0.75rem; border-left: 4px solid #d9e2f1; background: #f8fbff; }
 .badge { width: fit-content; border-radius: 999px; padding: 0.2rem 0.55rem; font-size: 0.75rem; font-weight: 800; }

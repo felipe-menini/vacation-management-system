@@ -12,6 +12,8 @@ public static class PermissionCodes
     public const string LeaveCatalogManage = "leave.catalog.manage";
     public const string LeavePoliciesRead = "leave.policies.read";
     public const string LeavePoliciesManage = "leave.policies.manage";
+    public const string LeaveCalendarsRead = "leave.calendars.read";
+    public const string LeaveCalendarsManage = "leave.calendars.manage";
 }
 
 public sealed record CurrentActor(Guid UserId);

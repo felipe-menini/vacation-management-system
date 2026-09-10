@@ -32,6 +32,7 @@ public static class DependencyInjection
         services.AddScoped<IOrganizationRepository, EfOrganizationRepository>();
         services.AddScoped<ILeaveCatalogRepository, EfLeaveCatalogRepository>();
         services.AddScoped<ILeavePolicyRepository, EfLeavePolicyRepository>();
+        services.AddScoped<IWorkingCalendarRepository, EfWorkingCalendarRepository>();
         services.AddScoped<IAuthorizationRepository, EfAuthorizationRepository>();
         services.AddSingleton(TimeProvider.System);
 
