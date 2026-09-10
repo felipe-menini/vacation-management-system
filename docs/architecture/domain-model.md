@@ -79,3 +79,9 @@ EP-04 implements `LeavePolicy` as the stable policy scoped to a LeaveType and op
 EP-05 implements `WorkingCalendar` as the stable calendar selected by policy versions that need business-day semantics. Calendar dates use `DateOnly`, not UTC timestamps. Each calendar owns exactly one configurable weekday rule for Monday through Sunday; there is no hardcoded global weekend concept. `WorkingCalendarException` stores dated overrides, and an explicit exception wins over the weekday rule. `IsWorkingDay = false` represents a non-working date, while `IsWorkingDay = true` represents an exceptional working date.
 
 `LeavePolicyVersion.WorkingCalendarId` is required when `DayCountMode` or `NoticeDayCountMode` is `BUSINESS_DAYS`, and may be null when both modes are `CALENDAR_DAYS`. New publication rejects inactive calendars, while already-published historical versions remain readable if the referenced calendar is later deactivated.
+
+## Implemented balance account and ledger model
+
+EP-06 implements `BalanceAccount` as the stable grouping for one `User + BalanceBucket`. `BalanceLedgerEntry` is the immutable accounting record for `GRANT`, `RESERVE`, `RELEASE`, `CONSUME`, `REFUND`, `ADJUSTMENT`, and `EXPIRE`.
+
+A balance account has no mutable balance field. Available and reserved balances are derived from ledger deltas. Future LeaveRequest integration will use reserve/release/consume/refund primitives, but EP-06 does not implement LeaveRequest.

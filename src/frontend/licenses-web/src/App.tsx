@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 
 type HealthStatus = 'Loading' | 'Healthy' | 'Unhealthy' | 'Degraded' | 'Unavailable';
 
@@ -15,6 +15,8 @@ type WorkingCalendarWeekday = { dayOfWeek: string; isWorkingDay: boolean };
 type WorkingCalendarException = { id: string; workingCalendarId: string; date: string; name: string; isWorkingDay: boolean };
 type WorkingCalendar = { id: string; code: string; name: string; description: string | null; isActive: boolean; weekdays: WorkingCalendarWeekday[]; exceptions: WorkingCalendarException[] };
 type DayCalculationResult = { startDate: string; endDate: string; dayCountMode: string; workingCalendarId: string | null; calculatedDays: number; details: { date: string; isCounted: boolean }[] };
+type BalanceSnapshot = { userId: string; balanceBucketId: string; balanceBucketCode: string; balanceBucketName: string; unit: string; available: number; reserved: number };
+type BalanceLedgerEntry = { id: string; operationId: string; type: string; availableDelta: number; reservedDelta: number; reason: string; createdByUserId: string | null; createdByUserName: string | null; createdAtUtc: string };
 
 type StatusCardProps = { label: string; status: HealthStatus };
 type CatalogKind = 'leave-types' | 'balance-buckets';
@@ -118,6 +120,13 @@ export function App() {
   const [calendars, setCalendars] = useState<WorkingCalendar[]>([]);
   const [calendarMessage, setCalendarMessage] = useState<string | null>(null);
   const [dayCalculation, setDayCalculation] = useState<DayCalculationResult | null>(null);
+  const [myBalances, setMyBalances] = useState<BalanceSnapshot[]>([]);
+  const [selectedBalanceUserId, setSelectedBalanceUserId] = useState<string>('');
+  const [selectedLedgerBucketId, setSelectedLedgerBucketId] = useState<string>('');
+  const [selectedUserBalances, setSelectedUserBalances] = useState<BalanceSnapshot[]>([]);
+  const [ledgerEntries, setLedgerEntries] = useState<BalanceLedgerEntry[]>([]);
+  const [balanceMessage, setBalanceMessage] = useState<string | null>(null);
+  const [isBalanceSubmitting, setIsBalanceSubmitting] = useState(false);
 
   const selectedActor = useMemo(() => actors.find((actor) => actor.id === selectedActorId) ?? null, [actors, selectedActorId]);
 
@@ -140,6 +149,21 @@ export function App() {
   async function loadCalendars(actorId: string | null) {
     setCalendars(await fetchJson<WorkingCalendar[]>('/working-calendars', actorId));
   }
+
+  async function loadMyBalances(actorId: string | null) {
+    setMyBalances(await fetchJson<BalanceSnapshot[]>('/balances/me', actorId));
+  }
+
+  const loadUserBalances = useCallback(async (userId: string, actorId: string | null) => {
+    if (!userId) {
+      setSelectedUserBalances([]);
+      setLedgerEntries([]);
+      return;
+    }
+    const balances = await fetchJson<BalanceSnapshot[]>(`/users/${userId}/balances`, actorId);
+    setSelectedUserBalances(balances);
+    if (!selectedLedgerBucketId && balances.length > 0) setSelectedLedgerBucketId(balances[0].balanceBucketId);
+  }, [selectedLedgerBucketId]);
 
   useEffect(() => {
     let isMounted = true;
@@ -243,11 +267,25 @@ export function App() {
     void loadCatalogData();
     void loadPolicyData();
     void loadCalendarData();
+    void (async () => {
+      try {
+        await loadMyBalances(selectedActorId);
+        if (selectedBalanceUserId) await loadUserBalances(selectedBalanceUserId, selectedActorId);
+        if (isMounted) setBalanceMessage(null);
+      } catch (error) {
+        if (isMounted) {
+          setMyBalances([]);
+          setSelectedUserBalances([]);
+          setLedgerEntries([]);
+          setBalanceMessage(error instanceof Error ? error.message : 'Unable to load balances.');
+        }
+      }
+    })();
 
     return () => {
       isMounted = false;
     };
-  }, [selectedActorId]);
+  }, [loadUserBalances, selectedActorId, selectedBalanceUserId]);
 
   function changeSelectedActor(actorId: string) {
     setSelectedActorId(actorId);
@@ -432,6 +470,48 @@ export function App() {
     }
   }
 
+  async function loadLedger(userId: string, balanceBucketId: string) {
+    if (!userId || !balanceBucketId) {
+      setLedgerEntries([]);
+      return;
+    }
+    setLedgerEntries(await fetchJson<BalanceLedgerEntry[]>(`/users/${userId}/balances/${balanceBucketId}/ledger`, selectedActorId));
+  }
+
+  async function selectBalanceUser(userId: string) {
+    setSelectedBalanceUserId(userId);
+    setSelectedLedgerBucketId('');
+    try {
+      await loadUserBalances(userId, selectedActorId);
+      setBalanceMessage(null);
+    } catch (error) {
+      setSelectedUserBalances([]);
+      setLedgerEntries([]);
+      setBalanceMessage(error instanceof Error ? error.message : 'Unable to load user balances.');
+    }
+  }
+
+  async function submitBalanceOperation(event: FormEvent<HTMLFormElement>, operation: 'grant' | 'adjust' | 'expire') {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const userId = String(data.get('userId') || selectedBalanceUserId);
+    const balanceBucketId = String(data.get('balanceBucketId') || selectedLedgerBucketId);
+    if (!userId || !balanceBucketId) return;
+    setIsBalanceSubmitting(true);
+    try {
+      await sendJson(`/users/${userId}/balances/${balanceBucketId}/${operation}`, 'POST', { operationId: crypto.randomUUID(), amount: Number(data.get('amount')), reason: data.get('reason') }, selectedActorId);
+      event.currentTarget.reset();
+      await loadMyBalances(selectedActorId);
+      await loadUserBalances(userId, selectedActorId);
+      await loadLedger(userId, balanceBucketId);
+      setBalanceMessage(`Balance ${operation} posted.`);
+    } catch (error) {
+      setBalanceMessage(error instanceof Error ? error.message : 'Unable to post balance operation.');
+    } finally {
+      setIsBalanceSubmitting(false);
+    }
+  }
+
   async function calculateDays(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
@@ -568,6 +648,79 @@ export function App() {
           <button type="submit">Calculate</button>
           {dayCalculation ? <p className="muted">Calculated days: <strong>{dayCalculation.calculatedDays}</strong></p> : null}
         </form>
+      </section>
+
+      <section className="admin-panel" aria-label="Balance ledger">
+        <div>
+          <p className="eyebrow">Balances</p>
+          <h2>My balances and scoped balance ledger</h2>
+          <p className="muted">Balances are derived from immutable ledger entries. HR actions expose grant, adjustment, and expiry only.</p>
+          {balanceMessage ? <p className={balanceMessage.includes('failed') || balanceMessage.includes('403') || balanceMessage.includes('401') ? 'error' : 'muted'}>{balanceMessage}</p> : null}
+        </div>
+        <article className="panel-card">
+          <h3>My balances</h3>
+          {myBalances.length === 0 ? <p className="muted">No balance accounts visible.</p> : null}
+          <div className="balance-grid">
+            {myBalances.map((balance) => (
+              <div className="balance-card" key={balance.balanceBucketId}>
+                <strong>{balance.balanceBucketName}</strong>
+                <code>{balance.balanceBucketCode}</code>
+                <span>Available: {balance.available} {balance.unit}</span>
+                <span>Reserved: {balance.reserved} {balance.unit}</span>
+              </div>
+            ))}
+          </div>
+        </article>
+        <div className="admin-grid">
+          <article className="panel-card catalog-form">
+            <h3>User balance inspection</h3>
+            <select value={selectedBalanceUserId} onChange={(event) => selectBalanceUser(event.target.value)}>
+              <option value="">Select user in scope</option>
+              {users.map((user) => <option key={user.id} value={user.id}>{user.displayName}</option>)}
+            </select>
+            <div className="catalog-list">
+              {selectedUserBalances.map((balance) => (
+                <button type="button" className="catalog-row" key={balance.balanceBucketId} onClick={() => { setSelectedLedgerBucketId(balance.balanceBucketId); void loadLedger(selectedBalanceUserId, balance.balanceBucketId); }}>
+                  <span>{balance.balanceBucketName}</span>
+                  <span>Available {balance.available}</span>
+                  <span>Reserved {balance.reserved}</span>
+                </button>
+              ))}
+            </div>
+          </article>
+          <article className="panel-card">
+            <h3>Ledger history</h3>
+            {ledgerEntries.length === 0 ? <p className="muted">Select a user balance to view ledger entries.</p> : null}
+            <div className="catalog-list">
+              {ledgerEntries.map((entry) => (
+                <div className="version-row" key={entry.id}>
+                  <span className="badge published">{entry.type}</span>
+                  <span>Available {entry.availableDelta}, reserved {entry.reservedDelta}</span>
+                  <span>{entry.reason}</span>
+                  <span>{new Date(entry.createdAtUtc).toLocaleString()} · {entry.createdByUserName ?? 'System'}</span>
+                </div>
+              ))}
+            </div>
+          </article>
+        </div>
+        <div className="admin-grid">
+          {(['grant', 'adjust', 'expire'] as const).map((operation) => (
+            <form className="panel-card catalog-form" key={operation} onSubmit={(event) => submitBalanceOperation(event, operation)}>
+              <h3>{operation.toUpperCase()}</h3>
+              <select name="userId" required defaultValue={selectedBalanceUserId}>
+                <option value="">Select user</option>
+                {users.map((user) => <option key={user.id} value={user.id}>{user.displayName}</option>)}
+              </select>
+              <select name="balanceBucketId" required defaultValue={selectedLedgerBucketId}>
+                <option value="">Select bucket</option>
+                {balanceBuckets.map((bucket) => <option key={bucket.id} value={bucket.id}>{bucket.code}</option>)}
+              </select>
+              <input name="amount" type="number" step="0.5" placeholder={operation === 'adjust' ? 'Signed amount' : 'Amount'} required />
+              <input name="reason" placeholder="Mandatory reason" required />
+              <button type="submit" disabled={isBalanceSubmitting}>Post {operation}</button>
+            </form>
+          ))}
+        </div>
       </section>
 
       <section className="admin-panel" aria-label="Leave policy admin">
@@ -742,3 +895,4 @@ function CatalogForm({ title, codePlaceholder, namePlaceholder, onSubmit, includ
 function flattenOrgUnits(units: OrgUnit[]): OrgUnit[] {
   return units.flatMap((unit) => [unit, ...flattenOrgUnits(unit.children ?? [])]);
 }
+

@@ -14,7 +14,12 @@ public static class PermissionCodes
     public const string LeavePoliciesManage = "leave.policies.manage";
     public const string LeaveCalendarsRead = "leave.calendars.read";
     public const string LeaveCalendarsManage = "leave.calendars.manage";
+    public const string LeaveBalancesReadSelf = "leave.balances.read.self";
+    public const string LeaveBalancesRead = "leave.balances.read";
+    public const string LeaveBalancesManage = "leave.balances.manage";
 }
 
 public sealed record CurrentActor(Guid UserId);
 public sealed record DevelopmentActorDto(Guid Id, string DisplayName, string Email, string? PrimaryOrgUnitName);
+
+
