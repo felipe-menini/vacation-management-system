@@ -61,3 +61,11 @@ The system does not store an editable “days remaining” value. It derives vis
 - [Domain model](../architecture/domain-model.md)
 - [Database](../architecture/database.md)
 - [Workflows](workflows.md)
+
+## Implemented EP-04 policy/version slice
+
+The implemented policy model now separates stable `LeavePolicy` records from effective-dated `LeavePolicyVersion` records. Company-wide policies use `OrgUnitId = null`; OrgUnit overrides use an explicit OrgUnit and may optionally apply to descendants. Company-wide policies persist `AppliesToDescendants = false` because descendant semantics only apply to overrides.
+
+Published versions are immutable and resolver-visible. Draft versions can be edited but never resolve. Published periods for the same policy must not overlap. Policy resolution prefers the deepest applicable OrgUnit override and then falls back to the company-wide LeaveType policy. A future LeaveRequest must reference the exact published `LeavePolicyVersion` used during evaluation.
+
+EP-04 stores day count mode, half-day allowance, notice days/mode, maximum request days, overlap behavior, and balance consumption bucket. It still does not calculate business days, holidays, actual leave-request overlaps, approvals, requests, ledger movements, user balances, carry-over, expiry, attachments, Entra, SharePoint, or capacity.

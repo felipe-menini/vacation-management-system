@@ -29,6 +29,7 @@ builder.Services.AddHealthChecks();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddScoped<OrganizationService>();
 builder.Services.AddScoped<LeaveCatalogService>();
+builder.Services.AddScoped<LeavePolicyService>();
 
 var app = builder.Build();
 
@@ -56,6 +57,7 @@ app.MapHealthChecks("/health/ready", HealthResponseWriter.ReadinessHealthOptions
 app.MapDevelopmentEndpoints();
 app.MapOrganizationEndpoints();
 app.MapLeaveCatalogEndpoints();
+app.MapLeavePolicyEndpoints();
 
 app.Run();
 

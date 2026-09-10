@@ -84,7 +84,13 @@ h2, h3 { margin: 0 0 1rem; }
 .catalog-row { display: grid; grid-template-columns: 1fr 1.5fr repeat(2, minmax(5rem, auto)); align-items: center; gap: 0.75rem; padding: 0.8rem; border: 1px solid #eef2f8; border-radius: 14px; }
 .catalog-row span:first-child { color: #315fb5; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-weight: 700; }
 .catalog-form { display: grid; gap: 0.75rem; }
-.catalog-form input { width: 100%; padding: 0.7rem 0.8rem; border: 1px solid #b8c7dc; border-radius: 12px; color: #172033; }
+.catalog-form input, .catalog-form select { width: 100%; padding: 0.7rem 0.8rem; border: 1px solid #b8c7dc; border-radius: 12px; color: #172033; background: #fff; }
+.inline-form { margin-top: 0.75rem; }
+.policy-card { display: grid; gap: 0.6rem; padding: 1rem; border: 1px solid #eef2f8; border-radius: 16px; }
+.version-row { display: grid; gap: 0.45rem; padding: 0.75rem; border-left: 4px solid #d9e2f1; background: #f8fbff; }
+.badge { width: fit-content; border-radius: 999px; padding: 0.2rem 0.55rem; font-size: 0.75rem; font-weight: 800; }
+.badge.draft { background: #fff7ed; color: #b54708; }
+.badge.published { background: #ecfdf3; color: #16794f; }
 
 @media (max-width: 760px) {
   .catalog-row { grid-template-columns: 1fr; align-items: flex-start; }

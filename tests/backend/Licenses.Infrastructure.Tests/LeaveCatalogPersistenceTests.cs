@@ -64,6 +64,10 @@ public sealed class LeaveCatalogPersistenceTests
             Assert.Equal(2, await verification.BalanceBuckets.CountAsync(x => new[] { "VACATION_DAYS", "MEDICAL_EXAM_DAYS" }.Contains(x.Code)));
             Assert.Equal(1, await verification.LeaveTypes.CountAsync(x => x.Code == "VACATION"));
             Assert.Equal(1, await verification.BalanceBuckets.CountAsync(x => x.Code == "VACATION_DAYS"));
+            Assert.Equal(3, await verification.LeavePolicies.CountAsync());
+            Assert.Equal(3, await verification.LeavePolicyVersions.CountAsync(x => x.Status == LeavePolicyVersionStatus.Published));
+            Assert.Equal(1, await verification.Permissions.CountAsync(x => x.Code == "leave.policies.read"));
+            Assert.Equal(1, await verification.Permissions.CountAsync(x => x.Code == "leave.policies.manage"));
         });
     }
 

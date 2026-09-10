@@ -12,8 +12,9 @@ erDiagram
     User ||--o{ ScopeAssignment : has
     Role ||--o{ ScopeAssignment : grants
     OrgUnit ||--o{ ScopeAssignment : scopes
-    LeaveType ||--o{ LeavePolicyVersion : versioned_by
-    BalanceBucketType ||--o{ LeaveType : may_back
+    LeaveType ||--o{ LeavePolicy : configures
+    LeavePolicy ||--o{ LeavePolicyVersion : versions
+    BalanceBucketType ||--o{ LeavePolicyVersion : may_back
     User ||--o{ LeaveRequest : requests
     LeaveRequest ||--o{ LeaveRequestDay : may_detail
     LeaveRequest ||--o{ ApprovalInstance : has
@@ -35,7 +36,8 @@ erDiagram
 | `UserOrgAssignment` | User membership in primary and optional secondary units. |
 | `Role` / `Permission` | RBAC catalog of functional capabilities. |
 | `ScopeAssignment` | User + role + root org unit + include-descendants flag. |
-| `LeaveType` | User-visible leave type; may consume a balance bucket. |
+| `LeaveType` | User-visible leave type catalog entry. Policy versions decide whether a leave type consumes a balance bucket. |
+| `LeavePolicy` | Stable company-wide or OrgUnit-scoped policy definition for a leave type. |
 | `BalanceBucketType` | Balance concept such as vacation, study leave, or medical exams. |
 | `LeavePolicyVersion` | Effective dated rule set for a leave type and optionally a unit. |
 | `HolidayCalendar` / `Holiday` | Assignable holiday calendars. |
@@ -67,3 +69,7 @@ erDiagram
 - [Authorization](authorization.md)
 - [Leave policies](../product/leave-policies.md)
 - [Workflows](../product/workflows.md)
+
+## Implemented policy/version model
+
+EP-04 implements `LeavePolicy` as the stable policy scoped to a LeaveType and optional OrgUnit, and `LeavePolicyVersion` as the exact effective-dated rule set. Draft versions can be edited, while published versions are immutable and resolver-visible. Future leave requests must store the exact published policy version used when evaluated, so later publications do not rewrite historical request semantics.

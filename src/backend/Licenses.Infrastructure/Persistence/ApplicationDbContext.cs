@@ -17,6 +17,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<RoleScopeAssignment> RoleScopeAssignments => Set<RoleScopeAssignment>();
     public DbSet<LeaveType> LeaveTypes => Set<LeaveType>();
     public DbSet<BalanceBucket> BalanceBuckets => Set<BalanceBucket>();
+    public DbSet<LeavePolicy> LeavePolicies => Set<LeavePolicy>();
+    public DbSet<LeavePolicyVersion> LeavePolicyVersions => Set<LeavePolicyVersion>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

@@ -45,10 +45,10 @@ public static class DevelopmentOrganizationSeeder
         var hrRole = await EnsureRoleAsync(db, "HR", "HR", "Organization-wide HR administration.", now, cancellationToken);
         var techAdmin = await EnsureRoleAsync(db, "TECH_ADMIN", "Technical Administrator", "Technical platform administration without default HR authority.", now, cancellationToken);
 
-        await EnsureRolePermissionsAsync(db, employee, [PermissionCodes.LeaveCatalogRead], permissions, cancellationToken);
-        await EnsureRolePermissionsAsync(db, supervisor, [PermissionCodes.OrgUnitsRead, PermissionCodes.OrgUsersRead, PermissionCodes.OrgAssignmentsRead, PermissionCodes.LeaveCatalogRead], permissions, cancellationToken);
-        await EnsureRolePermissionsAsync(db, manager, [PermissionCodes.OrgUnitsRead, PermissionCodes.OrgUnitsManage, PermissionCodes.OrgUsersRead, PermissionCodes.OrgUsersManage, PermissionCodes.OrgAssignmentsRead, PermissionCodes.OrgAssignmentsManage, PermissionCodes.LeaveCatalogRead], permissions, cancellationToken);
-        await EnsureRolePermissionsAsync(db, hrRole, [PermissionCodes.OrgUnitsRead, PermissionCodes.OrgUnitsManage, PermissionCodes.OrgUsersRead, PermissionCodes.OrgUsersManage, PermissionCodes.OrgAssignmentsRead, PermissionCodes.OrgAssignmentsManage, PermissionCodes.LeaveCatalogRead, PermissionCodes.LeaveCatalogManage], permissions, cancellationToken);
+        await EnsureRolePermissionsAsync(db, employee, [PermissionCodes.LeaveCatalogRead, PermissionCodes.LeavePoliciesRead], permissions, cancellationToken);
+        await EnsureRolePermissionsAsync(db, supervisor, [PermissionCodes.OrgUnitsRead, PermissionCodes.OrgUsersRead, PermissionCodes.OrgAssignmentsRead, PermissionCodes.LeaveCatalogRead, PermissionCodes.LeavePoliciesRead], permissions, cancellationToken);
+        await EnsureRolePermissionsAsync(db, manager, [PermissionCodes.OrgUnitsRead, PermissionCodes.OrgUnitsManage, PermissionCodes.OrgUsersRead, PermissionCodes.OrgUsersManage, PermissionCodes.OrgAssignmentsRead, PermissionCodes.OrgAssignmentsManage, PermissionCodes.LeaveCatalogRead, PermissionCodes.LeavePoliciesRead], permissions, cancellationToken);
+        await EnsureRolePermissionsAsync(db, hrRole, [PermissionCodes.OrgUnitsRead, PermissionCodes.OrgUnitsManage, PermissionCodes.OrgUsersRead, PermissionCodes.OrgUsersManage, PermissionCodes.OrgAssignmentsRead, PermissionCodes.OrgAssignmentsManage, PermissionCodes.LeaveCatalogRead, PermissionCodes.LeaveCatalogManage, PermissionCodes.LeavePoliciesRead, PermissionCodes.LeavePoliciesManage], permissions, cancellationToken);
         await EnsureRolePermissionsAsync(db, techAdmin, [PermissionCodes.OrgUnitsRead], permissions, cancellationToken);
 
         await EnsureRoleScopeAssignmentAsync(db, felipe.Id, manager.Id, it.Id, includeDescendants: true, now, cancellationToken);
@@ -59,6 +59,8 @@ public static class DevelopmentOrganizationSeeder
         await EnsureRoleScopeAssignmentAsync(db, hrUser.Id, hrRole.Id, company.Id, includeDescendants: true, now, cancellationToken);
 
         await EnsureLeaveCatalogSeedAsync(db, now, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+        await EnsureLeavePolicySeedAsync(db, now, cancellationToken);
 
         await db.SaveChangesAsync(cancellationToken);
     }
@@ -104,7 +106,9 @@ public static class DevelopmentOrganizationSeeder
             [PermissionCodes.OrgAssignmentsRead] = "Read user organizational assignments inside authorized scope.",
             [PermissionCodes.OrgAssignmentsManage] = "Manage user organizational assignments inside authorized scope.",
             [PermissionCodes.LeaveCatalogRead] = "Read leave catalog configuration.",
-            [PermissionCodes.LeaveCatalogManage] = "Create and update leave catalog configuration."
+            [PermissionCodes.LeaveCatalogManage] = "Create and update leave catalog configuration.",
+            [PermissionCodes.LeavePoliciesRead] = "Read leave policy configuration.",
+            [PermissionCodes.LeavePoliciesManage] = "Create, update, and publish leave policy configuration."
         };
 
         foreach (var item in catalog)
@@ -172,5 +176,86 @@ public static class DevelopmentOrganizationSeeder
     {
         if (await db.BalanceBuckets.AnyAsync(x => x.Code == code, cancellationToken)) return;
         await db.BalanceBuckets.AddAsync(BalanceBucket.Create(code, name, description, unit, isActive: true, now), cancellationToken);
+    }
+
+    private static async Task EnsureLeavePolicySeedAsync(ApplicationDbContext db, DateTime now, CancellationToken cancellationToken)
+    {
+        var vacation = await db.LeaveTypes.SingleAsync(x => x.Code == "VACATION", cancellationToken);
+        var medical = await db.LeaveTypes.SingleAsync(x => x.Code == "MEDICAL", cancellationToken);
+        var vacationBucket = await db.BalanceBuckets.SingleAsync(x => x.Code == "VACATION_DAYS", cancellationToken);
+        var it = await db.OrgUnits.SingleAsync(x => x.Code == "IT", cancellationToken);
+
+        var vacationPolicy = await EnsureLeavePolicyAsync(db, vacation.Id, orgUnitId: null, appliesToDescendants: false, now, cancellationToken);
+        await EnsurePublishedPolicyVersionAsync(
+            db,
+            vacationPolicy.Id,
+            versionNumber: 1,
+            effectiveFrom: new DateOnly(2026, 1, 1),
+            effectiveTo: null,
+            PolicyDayCountMode.BusinessDays,
+            allowHalfDay: true,
+            minimumNoticeDays: 7,
+            PolicyDayCountMode.CalendarDays,
+            maximumRequestDays: 15m,
+            PolicyOverlapBehavior.Block,
+            consumesBalance: true,
+            vacationBucket.Id,
+            now,
+            cancellationToken);
+
+        var medicalPolicy = await EnsureLeavePolicyAsync(db, medical.Id, orgUnitId: null, appliesToDescendants: false, now, cancellationToken);
+        await EnsurePublishedPolicyVersionAsync(
+            db,
+            medicalPolicy.Id,
+            versionNumber: 1,
+            effectiveFrom: new DateOnly(2026, 1, 1),
+            effectiveTo: null,
+            PolicyDayCountMode.CalendarDays,
+            allowHalfDay: false,
+            minimumNoticeDays: 0,
+            PolicyDayCountMode.CalendarDays,
+            maximumRequestDays: null,
+            PolicyOverlapBehavior.Allow,
+            consumesBalance: false,
+            balanceBucketId: null,
+            now,
+            cancellationToken);
+
+        var itVacationOverride = await EnsureLeavePolicyAsync(db, vacation.Id, it.Id, appliesToDescendants: true, now, cancellationToken);
+        await EnsurePublishedPolicyVersionAsync(
+            db,
+            itVacationOverride.Id,
+            versionNumber: 1,
+            effectiveFrom: new DateOnly(2026, 1, 1),
+            effectiveTo: null,
+            PolicyDayCountMode.BusinessDays,
+            allowHalfDay: true,
+            minimumNoticeDays: 5,
+            PolicyDayCountMode.CalendarDays,
+            maximumRequestDays: 10m,
+            PolicyOverlapBehavior.Warn,
+            consumesBalance: true,
+            vacationBucket.Id,
+            now,
+            cancellationToken);
+    }
+
+    private static async Task<LeavePolicy> EnsureLeavePolicyAsync(ApplicationDbContext db, Guid leaveTypeId, Guid? orgUnitId, bool appliesToDescendants, DateTime now, CancellationToken cancellationToken)
+    {
+        var existing = await db.LeavePolicies.FirstOrDefaultAsync(x => x.LeaveTypeId == leaveTypeId && x.OrgUnitId == orgUnitId, cancellationToken);
+        if (existing is not null) return existing;
+        var policy = LeavePolicy.Create(leaveTypeId, orgUnitId, appliesToDescendants, isActive: true, now);
+        await db.LeavePolicies.AddAsync(policy, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+        return policy;
+    }
+
+    private static async Task EnsurePublishedPolicyVersionAsync(ApplicationDbContext db, Guid policyId, int versionNumber, DateOnly effectiveFrom, DateOnly? effectiveTo, PolicyDayCountMode dayCountMode, bool allowHalfDay, int? minimumNoticeDays, PolicyDayCountMode noticeDayCountMode, decimal? maximumRequestDays, PolicyOverlapBehavior overlapBehavior, bool consumesBalance, Guid? balanceBucketId, DateTime now, CancellationToken cancellationToken)
+    {
+        if (await db.LeavePolicyVersions.AnyAsync(x => x.LeavePolicyId == policyId && x.VersionNumber == versionNumber, cancellationToken)) return;
+        var version = LeavePolicyVersion.CreateDraft(policyId, versionNumber, effectiveFrom, effectiveTo, dayCountMode, allowHalfDay, minimumNoticeDays, noticeDayCountMode, maximumRequestDays, overlapBehavior, consumesBalance, balanceBucketId, now);
+        version.Publish(now);
+        await db.LeavePolicyVersions.AddAsync(version, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
     }
 }

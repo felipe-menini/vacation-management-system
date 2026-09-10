@@ -48,7 +48,7 @@ The first authorization slice defines only organization-management capabilities:
 | `org.assignments.read` | Read user organizational assignments inside assigned scope. |
 | `org.assignments.manage` | Manage user organizational assignments inside assigned scope. |
 
-Leave, balance, approval, policy, audit, and document permissions are intentionally deferred until those capabilities exist.
+Leave requests, balances, approvals, audit, and document permissions are intentionally deferred until those capabilities exist. EP-04 adds policy-configuration permissions below.
 
 ## Open Decisions
 
@@ -60,3 +60,7 @@ Leave, balance, approval, policy, audit, and document permissions are intentiona
 
 - [Authorization architecture](../architecture/authorization.md)
 - [Security](../architecture/security.md)
+
+## Implemented leave policy permissions
+
+EP-04 adds `leave.policies.read` and `leave.policies.manage`. Development seed grants read to Employee, Supervisor, Manager, and HR. HR receives manage. Technical Administrator does not receive policy manage by default because policy configuration is an HR/business capability, not technical administration.
