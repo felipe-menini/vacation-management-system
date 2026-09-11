@@ -78,5 +78,67 @@ public sealed class LeaveRequestPersistenceTests
             await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"DELETE FROM licenses.leave_request_decisions WHERE id = {decision.Id}"));
         });
     }
+
+    [Fact]
+    public async Task CancellationAndRevocationHistoryConstraintsAndImmutabilityAreEnforced()
+    {
+        await PostgreSqlTestDatabase.WithFreshDatabaseAsync(async db =>
+        {
+            var now = DateTime.UtcNow;
+            var user = User.Create("Request User", $"lifecycle.user.{Guid.NewGuid():N}@example.test", null, now);
+            var approver = User.Create("Approver", $"lifecycle.approver.{Guid.NewGuid():N}@example.test", null, now);
+            var unit = OrgUnit.Create("Engineering", "ENG" + Guid.NewGuid().ToString("N")[..8], null, now);
+            var type = LeaveType.Create("VAC" + Guid.NewGuid().ToString("N")[..8], "Vacation", null, 1, true, now);
+            await db.Users.AddRangeAsync(user, approver);
+            await db.OrgUnits.AddAsync(unit);
+            await db.LeaveTypes.AddAsync(type);
+            await db.SaveChangesAsync();
+
+            var policy = LeavePolicy.Create(type.Id, null, false, true, now);
+            var version = LeavePolicyVersion.CreateDraft(policy.Id, 1, new DateOnly(2026, 1, 1), null, PolicyDayCountMode.CalendarDays, true, null, PolicyDayCountMode.CalendarDays, null, PolicyOverlapBehavior.Block, consumesBalance: false, balanceBucketId: null, workingCalendarId: null, now);
+            version.Publish(now);
+            await db.LeavePolicies.AddAsync(policy);
+            await db.LeavePolicyVersions.AddAsync(version);
+            await db.SaveChangesAsync();
+
+            var cancelledRequest = ApprovedRequest(user.Id, unit.Id, type.Id, version.Id, now);
+            var revokedRequest = ApprovedRequest(user.Id, unit.Id, type.Id, version.Id, now.AddMinutes(1));
+            await db.LeaveRequests.AddRangeAsync(cancelledRequest, revokedRequest);
+            await db.SaveChangesAsync();
+
+            var cancellation = LeaveRequestCancellation.Create(cancelledRequest.Id, user.Id, "Plans changed", Guid.NewGuid(), now);
+            cancelledRequest.RequestCancellation(now);
+            await db.LeaveRequestCancellations.AddAsync(cancellation);
+            await db.SaveChangesAsync();
+
+            await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO licenses.leave_request_cancellations (id, leave_request_id, requested_by_user_id, reason, operation_id, requested_at_utc) VALUES ({Guid.NewGuid()}, {cancelledRequest.Id}, {user.Id}, {"Duplicate"}, {Guid.NewGuid()}, {now})"));
+            await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"UPDATE licenses.leave_request_cancellations SET reason = {"Changed"} WHERE id = {cancellation.Id}"));
+            await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"UPDATE licenses.leave_request_cancellations SET decision = {"REJECT"} WHERE id = {cancellation.Id}"));
+
+            cancellation.Decide(LeaveRequestCancellationDecision.Approve, approver.Id, null, Guid.NewGuid(), null, now);
+            cancelledRequest.ApproveCancellation(now);
+            await db.SaveChangesAsync();
+
+            await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"UPDATE licenses.leave_request_cancellations SET decision_comment = {"Changed"} WHERE id = {cancellation.Id}"));
+            await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"DELETE FROM licenses.leave_request_cancellations WHERE id = {cancellation.Id}"));
+
+            var revocation = LeaveRequestRevocation.Create(revokedRequest.Id, approver.Id, "Operational need", Guid.NewGuid(), null, now);
+            revokedRequest.Revoke(now);
+            await db.LeaveRequestRevocations.AddAsync(revocation);
+            await db.SaveChangesAsync();
+
+            await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO licenses.leave_request_revocations (id, leave_request_id, revoked_by_user_id, reason, operation_id, created_at_utc) VALUES ({Guid.NewGuid()}, {revokedRequest.Id}, {approver.Id}, {"Duplicate"}, {Guid.NewGuid()}, {now})"));
+            await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"UPDATE licenses.leave_request_revocations SET reason = {"Changed"} WHERE id = {revocation.Id}"));
+            await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"DELETE FROM licenses.leave_request_revocations WHERE id = {revocation.Id}"));
+        });
+    }
+
+    private static LeaveRequest ApprovedRequest(Guid userId, Guid unitId, Guid typeId, Guid versionId, DateTime now)
+    {
+        var request = LeaveRequest.CreateDraft(userId, unitId, typeId, new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 1), LeaveRequestDayPortion.FullDay, null, userId, now);
+        request.Submit(versionId, 1m, null, null, now);
+        request.Approve(now);
+        return request;
+    }
 }
 

@@ -21,6 +21,10 @@ public static class PermissionCodes
     public const string LeaveRequestsCreateSelf = "leave.requests.create.self";
     public const string LeaveRequestsRead = "leave.requests.read";
     public const string LeaveRequestsDecide = "leave.requests.decide";
+    public const string LeaveRequestsCancelSelf = "leave.requests.cancel.self";
+    public const string LeaveRequestsCancelDecide = "leave.requests.cancel.decide";
+    public const string LeaveRequestsRevoke = "leave.requests.revoke";
+    public const string LeaveRequestsCreateForOthers = "leave.requests.create.for_others";
 }
 
 public sealed record CurrentActor(Guid UserId);

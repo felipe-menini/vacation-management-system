@@ -4,7 +4,7 @@ Leave requests represent an employee request for a leave type over business date
 
 ## Lifecycle
 
-Known statuses are DRAFT, PENDING_APPROVAL, APPROVED, REJECTED, CANCELLATION_REQUESTED, CANCELLED, REVOKED, and COMPLETED. EP-07 implements DRAFT -> PENDING_APPROVAL. EP-08 implements only the final approval decisions PENDING_APPROVAL -> APPROVED and PENDING_APPROVAL -> REJECTED.
+Known statuses are DRAFT, PENDING_APPROVAL, APPROVED, REJECTED, CANCELLATION_REQUESTED, CANCELLED, REVOKED, and COMPLETED. EP-07 implements DRAFT -> PENDING_APPROVAL. EP-08 implements the final approval decisions PENDING_APPROVAL -> APPROVED and PENDING_APPROVAL -> REJECTED. EP-09 implements approved-request cancellation, cancellation approval/rejection, revocation, and manual create-for-others.
 
 A DRAFT may be edited by its owner. Once submitted, core request fields, the frozen policy version, calculated days, and balance reservation linkage are not editable through the draft update API.
 
@@ -38,12 +38,24 @@ EP-08 uses a single final decision model. An authorized actor with `leave.reques
 
 Approval comments are optional. Rejection requires a non-empty reason. The employee's original request comment is not changed by approval or rejection.
 
-Approval/rejection is idempotent by command `OperationId`, concurrency-safe, and auditable through immutable decision history. `APPROVED` and `REJECTED` are final for this EP. Cancellation, revocation, completion, and multi-step approval are deferred.
+Approval/rejection is idempotent by command `OperationId`, concurrency-safe, and auditable through immutable decision history.
 
 Approval never re-resolves policy, recalculates days, or selects a new balance bucket. The frozen request values from submission are authoritative.
 
+## Cancellation and revocation
+
+EP-09 allows the owner of an `APPROVED` request to request cancellation. The request moves to `CANCELLATION_REQUESTED` and remains an active overlap until an authorized actor resolves it. Approving the cancellation moves it to `CANCELLED`; rejecting the cancellation moves it back to `APPROVED`.
+
+Administrative revocation moves an `APPROVED` request to `REVOKED`. The actor must be authorized for the request's stored organizational unit and cannot revoke their own request.
+
+Approved cancellation and revocation refund consuming leave with a `REFUND` ledger transaction based only on the frozen request values. Rejected cancellation does not mutate balance. Cancellation and revocation history records are immutable; they are not replaced or deleted.
+
+## Manual creation for others
+
+EP-09 allows authorized actors to create a leave request for another employee inside scope. The operation immediately reuses normal submission behavior: assignment validation, policy resolution, calculation, overlap checks, balance reservation, and idempotency. A successful manual create-for-others finishes as `PENDING_APPROVAL`; it does not auto-approve.
+
 ## Authorization
 
-Employees can create, edit, submit, list, and read their own requests. Supervisor, Manager, and HR may read requests inside organizational scope. EP-07 does not allow manager/HR creation on behalf or mutation of another user's request. Technical administrators receive no automatic business request permission.
+Employees can create, edit, submit, list, read, and request cancellation of their own requests. Supervisor, Manager, and HR may read, decide, resolve cancellations, revoke, and create requests for others inside organizational scope when granted the corresponding permissions. Technical administrators receive no automatic business request permission.
 
 MinimumNoticeDays validation remains intentionally deferred until company timezone and inclusive/exclusive notice semantics are explicitly decided.

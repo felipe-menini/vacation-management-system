@@ -18,7 +18,9 @@ type DayCalculationResult = { startDate: string; endDate: string; dayCountMode: 
 type BalanceSnapshot = { userId: string; balanceBucketId: string; balanceBucketCode: string; balanceBucketName: string; unit: string; available: number; reserved: number };
 type BalanceLedgerEntry = { id: string; operationId: string; type: string; availableDelta: number; reservedDelta: number; reason: string; createdByUserId: string | null; createdByUserName: string | null; createdAtUtc: string };
 type LeaveRequestDecision = { id: string; leaveRequestId: string; decision: string; decidedByUserId: string; decidedByUserDisplayName: string | null; comment: string | null; operationId: string; balanceSettlementOperationId: string | null; createdAtUtc: string };
-type LeaveRequest = { id: string; userId: string; userDisplayName: string | null; orgUnitId: string; orgUnitCode: string | null; orgUnitName: string | null; leaveTypeId: string; leaveTypeCode: string | null; leaveTypeName: string | null; leavePolicyVersionId: string | null; startDate: string; endDate: string; dayPortion: string; calculatedDays: number | null; status: string; comment: string | null; createdAtUtc: string; submittedAtUtc: string | null; decidedAtUtc: string | null; decision: LeaveRequestDecision | null };
+type LeaveRequestCancellation = { id: string; leaveRequestId: string; requestedByUserId: string; requestedByUserDisplayName: string | null; reason: string; operationId: string; requestedAtUtc: string; decision: string | null; decidedByUserId: string | null; decidedByUserDisplayName: string | null; decisionComment: string | null; decisionOperationId: string | null; balanceSettlementOperationId: string | null; decidedAtUtc: string | null };
+type LeaveRequestRevocation = { id: string; leaveRequestId: string; revokedByUserId: string; revokedByUserDisplayName: string | null; reason: string; operationId: string; balanceSettlementOperationId: string | null; createdAtUtc: string };
+type LeaveRequest = { id: string; userId: string; userDisplayName: string | null; orgUnitId: string; orgUnitCode: string | null; orgUnitName: string | null; leaveTypeId: string; leaveTypeCode: string | null; leaveTypeName: string | null; leavePolicyVersionId: string | null; startDate: string; endDate: string; dayPortion: string; calculatedDays: number | null; status: string; comment: string | null; balanceAccountId: string | null; balanceReservationOperationId: string | null; submissionOperationId: string | null; createdByUserId: string; createdByUserDisplayName: string | null; createdAtUtc: string; submittedAtUtc: string | null; decidedAtUtc: string | null; cancellationRequestedAtUtc: string | null; cancellationDecidedAtUtc: string | null; revokedAtUtc: string | null; decision: LeaveRequestDecision | null; cancellation: LeaveRequestCancellation | null; revocation: LeaveRequestRevocation | null };
 type SubmitLeaveRequestResult = { request: LeaveRequest; warnings: string[]; wasAlreadySubmitted: boolean };
 
 type StatusCardProps = { label: string; status: HealthStatus };
@@ -133,6 +135,7 @@ export function App() {
   const [myRequests, setMyRequests] = useState<LeaveRequest[]>([]);
   const [scopedRequests, setScopedRequests] = useState<LeaveRequest[]>([]);
   const [pendingApprovals, setPendingApprovals] = useState<LeaveRequest[]>([]);
+  const [pendingCancellations, setPendingCancellations] = useState<LeaveRequest[]>([]);
   const [processingDecisionId, setProcessingDecisionId] = useState<string | null>(null);
   const [requestMessage, setRequestMessage] = useState<string | null>(null);
   const [isRequestSubmitting, setIsRequestSubmitting] = useState(false);
@@ -174,6 +177,11 @@ export function App() {
       setPendingApprovals(await fetchJson<LeaveRequest[]>('/leave-requests/pending-approval', actorId));
     } catch {
       setPendingApprovals([]);
+    }
+    try {
+      setPendingCancellations(await fetchJson<LeaveRequest[]>('/leave-requests/pending-cancellation', actorId));
+    } catch {
+      setPendingCancellations([]);
     }
   }
 
@@ -305,6 +313,7 @@ export function App() {
           setMyRequests([]);
           setScopedRequests([]);
           setPendingApprovals([]);
+          setPendingCancellations([]);
         }
       }
     })();
@@ -589,6 +598,62 @@ export function App() {
     finally { setIsRequestSubmitting(false); }
   }
 
+  async function requestCancellation(event: FormEvent<HTMLFormElement>, requestId: string) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    try {
+      setProcessingDecisionId(requestId);
+      await sendJson(`/leave-requests/${requestId}/request-cancellation`, 'POST', { operationId: crypto.randomUUID(), reason: data.get('reason') }, selectedActorId);
+      await loadLeaveRequests(selectedActorId);
+      setRequestMessage('Cancellation requested.');
+    } catch (error) {
+      setRequestMessage(error instanceof Error ? error.message : 'Unable to request cancellation.');
+    } finally { setProcessingDecisionId(null); }
+  }
+
+  async function decideCancellation(event: FormEvent<HTMLFormElement>, requestId: string, decision: 'approve' | 'reject') {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    try {
+      setProcessingDecisionId(requestId);
+      await sendJson(`/leave-requests/${requestId}/${decision}-cancellation`, 'POST', { operationId: crypto.randomUUID(), comment: data.get('comment') || null }, selectedActorId);
+      await loadLeaveRequests(selectedActorId);
+      await loadMyBalances(selectedActorId);
+      setRequestMessage(`Cancellation ${decision === 'approve' ? 'approved' : 'rejected'}.`);
+    } catch (error) {
+      setRequestMessage(error instanceof Error ? error.message : `Unable to ${decision} cancellation.`);
+    } finally { setProcessingDecisionId(null); }
+  }
+
+  async function revokeLeaveRequest(event: FormEvent<HTMLFormElement>, requestId: string) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    try {
+      setProcessingDecisionId(requestId);
+      await sendJson(`/leave-requests/${requestId}/revoke`, 'POST', { operationId: crypto.randomUUID(), reason: data.get('reason') }, selectedActorId);
+      await loadLeaveRequests(selectedActorId);
+      await loadMyBalances(selectedActorId);
+      setRequestMessage('Request revoked.');
+    } catch (error) {
+      setRequestMessage(error instanceof Error ? error.message : 'Unable to revoke request.');
+    } finally { setProcessingDecisionId(null); }
+  }
+
+  async function createLeaveRequestForUser(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const userId = String(data.get('userId') ?? '');
+    try {
+      const result = await sendJson<SubmitLeaveRequestResult>(`/users/${userId}/leave-requests`, 'POST', { orgUnitId: data.get('orgUnitId'), leaveTypeId: data.get('leaveTypeId'), startDate: data.get('startDate'), endDate: data.get('endDate'), dayPortion: data.get('dayPortion'), comment: data.get('comment') || null, submissionOperationId: crypto.randomUUID() }, selectedActorId);
+      event.currentTarget.reset();
+      await loadLeaveRequests(selectedActorId);
+      await loadMyBalances(selectedActorId);
+      setRequestMessage(`Manual request created as ${result.request.status}.`);
+    } catch (error) {
+      setRequestMessage(error instanceof Error ? error.message : 'Unable to create request for employee.');
+    }
+  }
+
   async function decideLeaveRequest(event: FormEvent<HTMLFormElement>, requestId: string, decision: 'approve' | 'reject') {
     event.preventDefault();
     const operationId = crypto.randomUUID();
@@ -746,13 +811,27 @@ export function App() {
           <input name="comment" placeholder="Comment" />
           <button type="submit">Create draft</button>
         </form>
+        <form className="panel-card catalog-form" onSubmit={createLeaveRequestForUser}>
+          <h3>Create request for employee</h3>
+          <select name="userId" required><option value="">Select employee</option>{users.filter((user) => user.isActive).map((user) => <option key={user.id} value={user.id}>{user.displayName}</option>)}</select>
+          <select name="leaveTypeId" required><option value="">Select leave type</option>{leaveTypes.filter((type) => type.isActive).map((type) => <option key={type.id} value={type.id}>{type.code} - {type.name}</option>)}</select>
+          <select name="orgUnitId" required><option value="">Select org unit</option>{flattenOrgUnits(orgTree).filter((unit) => unit.isActive).map((unit) => <option key={unit.id} value={unit.id}>{unit.code} - {unit.name}</option>)}</select>
+          <input name="startDate" type="date" required />
+          <input name="endDate" type="date" required />
+          <select name="dayPortion" defaultValue="FULL_DAY"><option>FULL_DAY</option><option>HALF_DAY</option></select>
+          <input name="comment" placeholder="Comment" />
+          <button type="submit">Create and submit</button>
+        </form>
         <article className="panel-card"><h3>My requests</h3>{myRequests.length === 0 ? <p className="muted">No leave requests yet.</p> : null}<div className="catalog-list">
           {myRequests.map((request) => <div className="policy-card" key={request.id}>
             <strong>{request.leaveTypeCode ?? request.leaveTypeId} · {request.status}</strong>
             <span>{request.orgUnitCode ?? request.orgUnitId} · {request.startDate} → {request.endDate} · {request.dayPortion}</span>
             <span>Calculated: {request.calculatedDays ?? 'pending'} · Policy version: {request.leavePolicyVersionId ?? 'not frozen'}</span>
             <span>{request.comment ?? 'No comment'}</span>
+            <span>Created by: {request.createdByUserDisplayName ?? request.createdByUserId}</span>
             {request.decision ? <span>Decision: {request.decision.decision} by {request.decision.decidedByUserDisplayName ?? request.decision.decidedByUserId} on {new Date(request.decision.createdAtUtc).toLocaleString()}{request.decision.comment ? ` · ${request.decision.comment}` : ''}</span> : null}
+            {request.cancellation ? <span>Cancellation: {request.cancellation.reason} · {request.cancellation.decision ? `${request.cancellation.decision}${request.cancellation.decisionComment ? ` · ${request.cancellation.decisionComment}` : ''}` : 'pending'}</span> : null}
+            {request.revocation ? <span>Revoked: {request.revocation.reason} by {request.revocation.revokedByUserDisplayName ?? request.revocation.revokedByUserId}</span> : null}
             {request.status === 'DRAFT' ? <details><summary>Edit draft</summary><form className="catalog-form inline-form" onSubmit={(event) => updateLeaveRequest(event, request.id)}>
               <select name="leaveTypeId" required defaultValue={request.leaveTypeId}>{leaveTypes.map((type) => <option key={type.id} value={type.id}>{type.code}</option>)}</select>
               <select name="orgUnitId" required defaultValue={request.orgUnitId}>{flattenOrgUnits(orgTree).map((unit) => <option key={unit.id} value={unit.id}>{unit.code}</option>)}</select>
@@ -763,6 +842,7 @@ export function App() {
               <button type="submit">Update draft</button>
             </form></details> : null}
             {request.status === 'DRAFT' ? <button type="button" disabled={isRequestSubmitting} onClick={() => submitLeaveRequest(request.id)}>Submit</button> : null}
+            {request.status === 'APPROVED' ? <form className="catalog-form inline-form" onSubmit={(event) => requestCancellation(event, request.id)}><input name="reason" placeholder="Cancellation reason" required /><button type="submit" disabled={processingDecisionId === request.id}>Request cancellation</button></form> : null}
           </div>)}
         </div></article>
         <article className="panel-card"><h3>Pending approvals</h3>{pendingApprovals.length === 0 ? <p className="muted">No pending approvals visible for this actor.</p> : null}<div className="catalog-list">
@@ -783,7 +863,24 @@ export function App() {
             </div> : <p className="muted">Own request: decision controls hidden.</p>}
           </div>)}
         </div></article>
-        {scopedRequests.length > 0 ? <article className="panel-card"><h3>Scoped request inspector</h3><div className="catalog-list">{scopedRequests.map((request) => <div className="version-row" key={request.id}><span>{request.userDisplayName ?? request.userId}</span><span>{request.leaveTypeCode}</span><span>{request.orgUnitCode}</span><span>{request.startDate} → {request.endDate}</span><span>{request.status}</span>{request.decision ? <span>{request.decision.decision} · {request.decision.comment ?? 'No decision comment'}</span> : null}</div>)}</div></article> : null}
+        <article className="panel-card"><h3>Pending cancellations</h3>{pendingCancellations.length === 0 ? <p className="muted">No pending cancellations visible for this actor.</p> : null}<div className="catalog-list">
+          {pendingCancellations.map((request) => <div className="version-row" key={request.id}>
+            <strong>{request.userDisplayName ?? request.userId} · {request.leaveTypeCode ?? request.leaveTypeName ?? request.leaveTypeId}</strong>
+            <span>{request.orgUnitCode ?? request.orgUnitName ?? request.orgUnitId} · {request.startDate} → {request.endDate} · {request.calculatedDays ?? 'pending'} days</span>
+            <span>Reason: {request.cancellation?.reason ?? 'No reason'}</span>
+            {request.userId !== selectedActorId ? <div className="decision-actions">
+              <form className="catalog-form inline-form" onSubmit={(event) => decideCancellation(event, request.id, 'approve')}>
+                <input name="comment" placeholder="Optional approval comment" />
+                <button type="submit" disabled={processingDecisionId === request.id}>Approve cancellation</button>
+              </form>
+              <form className="catalog-form inline-form" onSubmit={(event) => decideCancellation(event, request.id, 'reject')}>
+                <input name="comment" placeholder="Required rejection reason" required />
+                <button type="submit" disabled={processingDecisionId === request.id}>Reject cancellation</button>
+              </form>
+            </div> : <p className="muted">Own request: cancellation decision controls hidden.</p>}
+          </div>)}
+        </div></article>
+        {scopedRequests.length > 0 ? <article className="panel-card"><h3>Scoped request inspector</h3><div className="catalog-list">{scopedRequests.map((request) => <div className="version-row" key={request.id}><span>{request.userDisplayName ?? request.userId}</span><span>{request.leaveTypeCode}</span><span>{request.orgUnitCode}</span><span>{request.startDate} → {request.endDate}</span><span>{request.status}</span>{request.decision ? <span>{request.decision.decision} · {request.decision.comment ?? 'No decision comment'}</span> : null}{request.cancellation ? <span>Cancellation: {request.cancellation.reason}</span> : null}{request.revocation ? <span>Revocation: {request.revocation.reason}</span> : null}{request.status === 'APPROVED' && request.userId !== selectedActorId ? <form className="catalog-form inline-form" onSubmit={(event) => revokeLeaveRequest(event, request.id)}><input name="reason" placeholder="Revocation reason" required /><button type="submit" disabled={processingDecisionId === request.id}>Revoke</button></form> : null}</div>)}</div></article> : null}
       </section>
 
       <section className="admin-panel" aria-label="Balance ledger">

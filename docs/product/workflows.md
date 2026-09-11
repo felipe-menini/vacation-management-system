@@ -44,15 +44,15 @@ stateDiagram-v2
 6. When all steps complete, reservation becomes consumption. On rejection, reservation is released.
 7. A domain/outbox event is recorded so notification failure does not roll back the business transaction.
 
-This describes the broader target workflow. EP-08 implements only one final approval decision and does not create routing, multi-step approval, or notification/outbox behavior.
+This describes the broader target workflow. EP-08 implements only one final approval decision. EP-09 implements cancellation, revocation, and manual create-for-others. Routing, multi-step approval, and notification/outbox behavior remain deferred.
 
 ## Cancellation flow
 
-A cancellation request does not delete or directly modify approved leave. While pending, the leave remains visible as approved with a cancellation-requested indicator. Only approval of the cancellation changes the state to `CANCELLED` and releases/refunds balance according to policy.
+A cancellation request does not delete approved leave. While pending, the request is `CANCELLATION_REQUESTED` and remains an active overlap. Only approval of the cancellation changes the state to `CANCELLED` and refunds consuming balance. Rejection returns the request to `APPROVED`.
 
 ## Revocation flow
 
-Revocation is administrative and distinct from employee-requested cancellation. It requires authorization, mandatory reason, and audit. The policy defines whether all, part, or none of the balance is returned.
+Revocation is administrative and distinct from employee-requested cancellation. It requires authorization, mandatory reason, and immutable history. EP-09 refunds consuming leave based on the frozen approved request.
 
 ## Related documents
 
@@ -70,6 +70,6 @@ DRAFT -> PENDING_APPROVAL -> APPROVED
                          \-> REJECTED
 ```
 
-There is one final approval decision. Multi-step approval, configurable routing, cancellation, revocation, completion, notifications, and attachments are intentionally deferred.
+There is one final approval decision. Multi-step approval, configurable routing, completion, notifications, and attachments are intentionally deferred.
 
 Approval consumes the existing reservation. Rejection releases it. Both use the frozen submitted request values and store immutable decision history.

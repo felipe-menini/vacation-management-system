@@ -91,6 +91,51 @@ public sealed class LeaveRequestDomainTests
         Assert.Throws<ArgumentException>(() => LeaveRequestDecision.Create(request.Id, LeaveRequestDecisionKind.Reject, Guid.NewGuid(), " ", Guid.NewGuid(), null, DateTime.UtcNow));
     }
 
+
+
+    [Fact]
+    public void ApprovedRequestCanRequestCancellationThenBeCancelledOrReturnedToApproved()
+    {
+        var cancelled = Submitted();
+        cancelled.Approve(DateTime.UtcNow);
+        var originalPolicyVersion = cancelled.LeavePolicyVersionId;
+        var originalDays = cancelled.CalculatedDays;
+        cancelled.RequestCancellation(DateTime.UtcNow);
+        cancelled.ApproveCancellation(DateTime.UtcNow);
+
+        Assert.Equal(LeaveRequestStatus.Cancelled, cancelled.Status);
+        Assert.Equal(originalPolicyVersion, cancelled.LeavePolicyVersionId);
+        Assert.Equal(originalDays, cancelled.CalculatedDays);
+
+        var rejectedCancellation = Submitted();
+        rejectedCancellation.Approve(DateTime.UtcNow);
+        rejectedCancellation.RequestCancellation(DateTime.UtcNow);
+        rejectedCancellation.RejectCancellation(DateTime.UtcNow);
+        Assert.Equal(LeaveRequestStatus.Approved, rejectedCancellation.Status);
+    }
+
+    [Fact]
+    public void ApprovedRequestCanBeRevokedAndInvalidStatesCannotUseEp09Transitions()
+    {
+        var request = Submitted();
+        Assert.Throws<InvalidOperationException>(() => request.RequestCancellation(DateTime.UtcNow));
+        Assert.Throws<InvalidOperationException>(() => request.Revoke(DateTime.UtcNow));
+        request.Approve(DateTime.UtcNow);
+        request.Revoke(DateTime.UtcNow);
+        Assert.Equal(LeaveRequestStatus.Revoked, request.Status);
+        Assert.NotNull(request.RevokedAtUtc);
+    }
+
+    [Fact]
+    public void CancellationAndRevocationHistoryRequireReasons()
+    {
+        Assert.Throws<ArgumentException>(() => LeaveRequestCancellation.Create(Guid.NewGuid(), Guid.NewGuid(), " ", Guid.NewGuid(), DateTime.UtcNow));
+        Assert.Throws<ArgumentException>(() => LeaveRequestRevocation.Create(Guid.NewGuid(), Guid.NewGuid(), " ", Guid.NewGuid(), null, DateTime.UtcNow));
+        var cancellation = LeaveRequestCancellation.Create(Guid.NewGuid(), Guid.NewGuid(), "  Need to change dates  ", Guid.NewGuid(), DateTime.UtcNow);
+        Assert.Equal("Need to change dates", cancellation.Reason);
+        Assert.Throws<ArgumentException>(() => cancellation.Decide(LeaveRequestCancellationDecision.Reject, Guid.NewGuid(), " ", Guid.NewGuid(), null, DateTime.UtcNow));
+    }
+
     private static LeaveRequest Draft(DateOnly? start = null, DateOnly? end = null, LeaveRequestDayPortion portion = LeaveRequestDayPortion.FullDay) =>
         LeaveRequest.CreateDraft(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), start ?? new DateOnly(2026, 9, 1), end ?? new DateOnly(2026, 9, 1), portion, null, Guid.NewGuid(), DateTime.UtcNow);
 
