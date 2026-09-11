@@ -89,7 +89,7 @@ public sealed class BalanceEndpointAuthorizationTests(WebApplicationFactory<Prog
         public Task<User?> GetUserAsync(Guid userId, CancellationToken cancellationToken) => Task.FromResult<User?>(null);
         public Task<IReadOnlyList<BalanceSnapshotRecord>> ListSnapshotsAsync(Guid userId, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<BalanceSnapshotRecord>>([]);
         public Task<IReadOnlyList<BalanceLedgerEntryRecord>?> ListLedgerAsync(Guid userId, Guid balanceBucketId, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<BalanceLedgerEntryRecord>?>([]);
-        public Task<BalanceMutationRecord> MutateAsync(Guid userId, Guid balanceBucketId, Guid operationId, BalanceLedgerEntryType type, decimal amount, string reason, Guid? createdByUserId, DateTime createdAtUtc, CancellationToken cancellationToken)
+        public Task<BalanceMutationRecord> MutateAsync(Guid userId, Guid balanceBucketId, Guid operationId, BalanceLedgerEntryType type, decimal amount, string reason, Guid? createdByUserId, DateTime createdAtUtc, BalanceMutationAuditContext? auditContext, CancellationToken cancellationToken)
         {
             var snapshot = new BalanceSnapshotRecord(userId, balanceBucketId, "VACATION_DAYS", "Vacation Days", BalanceBucketUnit.Day, amount, 0m);
             return Task.FromResult(new BalanceMutationRecord(Guid.NewGuid(), operationId, snapshot, false));

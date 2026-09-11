@@ -1,8 +1,10 @@
+using Licenses.Application.Audit;
+using Licenses.Application.Authorization;
 using Licenses.Domain.LeaveManagement;
 
 namespace Licenses.Application.LeaveManagement;
 
-public sealed class WorkingCalendarService(IWorkingCalendarRepository repository, TimeProvider timeProvider)
+public sealed class WorkingCalendarService(IWorkingCalendarRepository repository, TimeProvider timeProvider, ICurrentActor? currentActor = null, IAuditWriter? auditWriter = null)
 {
     private readonly DayCalculator _calculator = new();
 
@@ -18,6 +20,7 @@ public sealed class WorkingCalendarService(IWorkingCalendarRepository repository
         if (await repository.CodeExistsAsync(code, null, cancellationToken)) throw new InvalidOperationException("A working calendar with this code already exists.");
         var calendar = WorkingCalendar.Create(code, command.Name, command.Description, command.IsActive ?? true, ParseWeekdays(command.Weekdays), UtcNow());
         await repository.AddCalendarAsync(calendar, cancellationToken);
+        await WriteCalendarAuditAsync("leave.calendar.create", calendar, cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
         return ToDto(calendar);
     }
@@ -27,6 +30,7 @@ public sealed class WorkingCalendarService(IWorkingCalendarRepository repository
         var calendar = await repository.GetCalendarAsync(id, cancellationToken);
         if (calendar is null) return null;
         calendar.UpdateDetails(command.Name, command.Description, command.IsActive, ParseWeekdays(command.Weekdays), UtcNow());
+        await WriteCalendarAuditAsync("leave.calendar.update", calendar, cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
         return ToDto(calendar);
     }
@@ -42,6 +46,7 @@ public sealed class WorkingCalendarService(IWorkingCalendarRepository repository
         var calendar = await repository.GetCalendarAsync(calendarId, cancellationToken) ?? throw new InvalidOperationException("Working calendar does not exist.");
         if (await repository.ExceptionDateExistsAsync(calendarId, command.Date, null, cancellationToken)) throw new InvalidOperationException("An exception already exists for this calendar date.");
         var exception = calendar.AddException(command.Date, command.Name, command.IsWorkingDay, UtcNow());
+        await WriteExceptionAuditAsync("leave.calendar.exception.create", exception, cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
         return ToExceptionDto(exception);
     }
@@ -52,6 +57,7 @@ public sealed class WorkingCalendarService(IWorkingCalendarRepository repository
         if (exception is null) return null;
         if (await repository.ExceptionDateExistsAsync(exception.WorkingCalendarId, command.Date, id, cancellationToken)) throw new InvalidOperationException("An exception already exists for this calendar date.");
         exception.Update(command.Date, command.Name, command.IsWorkingDay, UtcNow());
+        await WriteExceptionAuditAsync("leave.calendar.exception.update", exception, cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
         return ToExceptionDto(exception);
     }
@@ -89,4 +95,41 @@ public sealed class WorkingCalendarService(IWorkingCalendarRepository repository
 
     private static string ToDayCountCode(PolicyDayCountMode mode) => mode switch { PolicyDayCountMode.BusinessDays => "BUSINESS_DAYS", PolicyDayCountMode.CalendarDays => "CALENDAR_DAYS", _ => throw new ArgumentOutOfRangeException(nameof(mode)) };
     private DateTime UtcNow() => timeProvider.GetUtcNow().UtcDateTime;
+
+    private Task WriteCalendarAuditAsync(string action, WorkingCalendar calendar, CancellationToken cancellationToken) =>
+        auditWriter is null
+            ? Task.CompletedTask
+            : auditWriter.WriteAsync(new AuditEventData(
+                currentActor?.UserId,
+                action,
+                "WorkingCalendar",
+                calendar.Id,
+                null,
+                null,
+                null,
+                UtcNow(),
+                AuditMetadataJson.Serialize(new
+                {
+                    calendar.Code,
+                    calendar.IsActive
+                })), cancellationToken);
+
+    private Task WriteExceptionAuditAsync(string action, WorkingCalendarException exception, CancellationToken cancellationToken) =>
+        auditWriter is null
+            ? Task.CompletedTask
+            : auditWriter.WriteAsync(new AuditEventData(
+                currentActor?.UserId,
+                action,
+                "WorkingCalendarException",
+                exception.Id,
+                null,
+                null,
+                null,
+                UtcNow(),
+                AuditMetadataJson.Serialize(new
+                {
+                    workingCalendarId = exception.WorkingCalendarId,
+                    exception.Date,
+                    exception.IsWorkingDay
+                })), cancellationToken);
 }

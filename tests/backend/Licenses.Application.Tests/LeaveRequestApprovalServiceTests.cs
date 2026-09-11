@@ -1,3 +1,4 @@
+using Licenses.Application.Audit;
 using Licenses.Application.Authorization;
 using Licenses.Application.LeaveManagement;
 using Licenses.Application.Notifications;
@@ -32,6 +33,10 @@ public sealed class LeaveRequestApprovalServiceTests
         Assert.Equal(setup.Request.Id, ev.LeaveRequestId);
         Assert.Equal(setup.Request.UserId, ev.SubjectUserId);
         Assert.Equal(setup.Request.OrgUnitId, ev.OrgUnitId);
+        Assert.Single(setup.Audit.Events);
+        Assert.Equal("leave.request.approve", setup.Audit.Events[0].Action);
+        Assert.Equal(setup.Approver.Id, setup.Audit.Events[0].ActorUserId);
+        Assert.Equal(setup.Employee.Id, setup.Audit.Events[0].SubjectUserId);
     }
 
     [Fact]
@@ -49,6 +54,8 @@ public sealed class LeaveRequestApprovalServiceTests
         Assert.Equal(BalanceLedgerEntryType.Release, setup.Balances.Mutations[0].Type);
         Assert.Single(setup.Outbox.Messages);
         Assert.IsType<LeaveRequestRejected>(setup.Outbox.Messages[0].Event);
+        Assert.Single(setup.Audit.Events);
+        Assert.Equal("leave.request.reject", setup.Audit.Events[0].Action);
     }
 
     [Fact]
@@ -67,6 +74,8 @@ public sealed class LeaveRequestApprovalServiceTests
         Assert.Equal(setup.Request.Id, ev.LeaveRequestId);
         Assert.Equal(setup.Employee.Id, ev.SubjectUserId);
         Assert.Equal(setup.Unit.Id, ev.OrgUnitId);
+        Assert.Single(setup.Audit.Events);
+        Assert.Equal("leave.request.submit", setup.Audit.Events[0].Action);
     }
     [Fact]
     public async Task SelfDecisionAndOperationIdConflictsAreRejected()
@@ -75,6 +84,7 @@ public sealed class LeaveRequestApprovalServiceTests
         var operationId = Guid.NewGuid();
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => setup.CreateService(setup.Employee.Id, PermissionCodes.LeaveRequestsDecide).ApproveAsync(setup.Request.Id, new(operationId, null), CancellationToken.None)!);
         Assert.Empty(setup.Outbox.Messages);
+        Assert.Empty(setup.Audit.Events);
 
         var service = setup.CreateService(setup.Approver.Id, PermissionCodes.LeaveRequestsDecide);
         await service.ApproveAsync(setup.Request.Id, new(operationId, null), CancellationToken.None);
@@ -100,6 +110,8 @@ public sealed class LeaveRequestApprovalServiceTests
         Assert.Empty(setup.Balances.Mutations);
         Assert.Single(setup.Outbox.Messages);
         Assert.IsType<LeaveCancellationRequested>(setup.Outbox.Messages[0].Event);
+        Assert.Single(setup.Audit.Events);
+        Assert.Equal("leave.request.cancellation.request", setup.Audit.Events[0].Action);
         await Assert.ThrowsAsync<InvalidOperationException>(() => owner.RequestCancellationAsync(setup.Request.Id, new(operationId, "Different"), CancellationToken.None)!);
     }
 
@@ -121,6 +133,8 @@ public sealed class LeaveRequestApprovalServiceTests
         Assert.Equal(approving.Request.CalculatedDays, approving.Balances.Mutations[0].Amount);
         Assert.Equal(2, approving.Outbox.Messages.Count);
         Assert.IsType<LeaveCancellationApproved>(approving.Outbox.Messages[1].Event);
+        Assert.Equal(2, approving.Audit.Events.Count);
+        Assert.Contains(approving.Audit.Events, x => x.Action == "leave.request.cancellation.approve");
 
         var rejecting = TestSetup.Create(consumesBalance: true);
         rejecting.Request.Approve(Now);
@@ -132,6 +146,8 @@ public sealed class LeaveRequestApprovalServiceTests
         Assert.Empty(rejecting.Balances.Mutations);
         Assert.Equal(2, rejecting.Outbox.Messages.Count);
         Assert.IsType<LeaveCancellationRejected>(rejecting.Outbox.Messages[1].Event);
+        Assert.Equal(2, rejecting.Audit.Events.Count);
+        Assert.Contains(rejecting.Audit.Events, x => x.Action == "leave.request.cancellation.reject");
     }
 
     [Fact]
@@ -152,6 +168,8 @@ public sealed class LeaveRequestApprovalServiceTests
         Assert.Equal(BalanceLedgerEntryType.Refund, setup.Balances.Mutations[0].Type);
         Assert.Single(setup.Outbox.Messages);
         Assert.IsType<LeaveRequestRevoked>(setup.Outbox.Messages[0].Event);
+        Assert.Single(setup.Audit.Events);
+        Assert.Equal("leave.request.revoke", setup.Audit.Events[0].Action);
     }
 
     [Fact]
@@ -172,9 +190,29 @@ public sealed class LeaveRequestApprovalServiceTests
         Assert.True(retry.WasAlreadySubmitted);
         Assert.Single(setup.Balances.Mutations);
         Assert.Equal(BalanceLedgerEntryType.Reserve, setup.Balances.Mutations[0].Type);
+        Assert.Single(setup.Audit.Events);
+        Assert.Equal("leave.request.create_for_other", setup.Audit.Events[0].Action);
+        Assert.Equal(setup.Approver.Id, setup.Audit.Events[0].ActorUserId);
+        Assert.Equal(setup.Employee.Id, setup.Audit.Events[0].SubjectUserId);
     }
 
-    private sealed record TestSetup(User Employee, User Approver, OrgUnit Unit, LeaveType Type, LeavePolicy Policy, LeavePolicyVersion Version, LeaveRequest Request, FakeLeaveRequestRepository Requests, FakeBalanceRepository Balances, FakeApplicationEventOutbox Outbox)
+    [Fact]
+    public async Task CreateDraftAuditsCreateOnce()
+    {
+        var setup = TestSetup.CreateDraft(consumesBalance: false);
+        var service = setup.CreateService(setup.Employee.Id, PermissionCodes.LeaveRequestsCreateSelf);
+        var command = new CreateLeaveRequestCommand(setup.Unit.Id, setup.Type.Id, new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 1), "FULL_DAY", "Draft");
+
+        var result = await service.CreateDraftAsync(command, CancellationToken.None);
+
+        Assert.Equal("DRAFT", result.Status);
+        Assert.Single(setup.Audit.Events);
+        Assert.Equal("leave.request.create", setup.Audit.Events[0].Action);
+        Assert.Equal(setup.Employee.Id, setup.Audit.Events[0].ActorUserId);
+        Assert.Equal(setup.Employee.Id, setup.Audit.Events[0].SubjectUserId);
+    }
+
+    private sealed record TestSetup(User Employee, User Approver, OrgUnit Unit, LeaveType Type, LeavePolicy Policy, LeavePolicyVersion Version, LeaveRequest Request, FakeLeaveRequestRepository Requests, FakeBalanceRepository Balances, FakeApplicationEventOutbox Outbox, FakeAuditWriter Audit)
     {
         public static TestSetup Create(bool consumesBalance) => CreateCore(consumesBalance, submitted: true);
 
@@ -199,14 +237,15 @@ public sealed class LeaveRequestApprovalServiceTests
             var balances = new FakeBalanceRepository(bucketId);
             var requests = new FakeLeaveRequestRepository(employee, approver, unit, type, policy, version, request);
             var outbox = new FakeApplicationEventOutbox();
-            return new(employee, approver, unit, type, policy, version, request, requests, balances, outbox);
+            var audit = new FakeAuditWriter();
+            return new(employee, approver, unit, type, policy, version, request, requests, balances, outbox, audit);
         }
 
         public LeaveRequestService CreateService(Guid actorId, params string[] permissions)
         {
             var auth = new AuthorizationService(new FakeAuthorizationRepository(actorId, Unit, Employee, Approver, permissions), new FixedTimeProvider(Now));
             var balance = new BalanceService(Balances, auth, new FixedCurrentActor(actorId), new FixedTimeProvider(Now));
-            return new LeaveRequestService(Requests, new FakePolicyRepository(Policy, Version, Type, Unit), balance, auth, new FixedCurrentActor(actorId), new FixedTimeProvider(Now), Outbox);
+            return new LeaveRequestService(Requests, new FakePolicyRepository(Policy, Version, Type, Unit), balance, auth, new FixedCurrentActor(actorId), new FixedTimeProvider(Now), Outbox, Audit);
         }
     }
 
@@ -264,7 +303,7 @@ public sealed class LeaveRequestApprovalServiceTests
         public Task<User?> GetUserAsync(Guid id, CancellationToken ct) => Task.FromResult<User?>(null);
         public Task<IReadOnlyList<BalanceSnapshotRecord>> ListSnapshotsAsync(Guid id, CancellationToken ct) => Task.FromResult<IReadOnlyList<BalanceSnapshotRecord>>([]);
         public Task<IReadOnlyList<BalanceLedgerEntryRecord>?> ListLedgerAsync(Guid id, Guid b, CancellationToken ct) => Task.FromResult<IReadOnlyList<BalanceLedgerEntryRecord>?>([]);
-        public Task<BalanceMutationRecord> MutateAsync(Guid userId, Guid b, Guid op, BalanceLedgerEntryType type, decimal amount, string reason, Guid? by, DateTime at, CancellationToken ct)
+        public Task<BalanceMutationRecord> MutateAsync(Guid userId, Guid b, Guid op, BalanceLedgerEntryType type, decimal amount, string reason, Guid? by, DateTime at, BalanceMutationAuditContext? auditContext, CancellationToken ct)
         {
             Mutations.Add((type, amount));
             return Task.FromResult(new BalanceMutationRecord(Guid.NewGuid(), op, new BalanceSnapshotRecord(userId, bucketId ?? b, "VAC", "Vacation", BalanceBucketUnit.Day, 0m, 0m), false));
@@ -325,6 +364,16 @@ public sealed class LeaveRequestApprovalServiceTests
         {
             if (!Messages.Any(x => x.Event.GetType() == applicationEvent.GetType() && x.CorrelationId == correlationId))
                 Messages.Add((applicationEvent, correlationId));
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class FakeAuditWriter : IAuditWriter
+    {
+        public List<AuditEventData> Events { get; } = [];
+        public Task WriteAsync(AuditEventData auditEvent, CancellationToken cancellationToken)
+        {
+            Events.Add(auditEvent);
             return Task.CompletedTask;
         }
     }

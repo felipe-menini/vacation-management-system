@@ -39,11 +39,11 @@ public sealed class BalanceService(IBalanceRepository repository, AuthorizationS
     {
         var actorId = RequireActor();
         if (!await authorization.CanAccessUserAsync(actorId, PermissionCodes.LeaveBalancesManage, command.UserId, cancellationToken)) return null;
-        return ToDto(await repository.MutateAsync(command.UserId, command.BalanceBucketId, command.OperationId, type, command.Amount, command.Reason, actorId, UtcNow(), cancellationToken));
+        return ToDto(await repository.MutateAsync(command.UserId, command.BalanceBucketId, command.OperationId, type, command.Amount, command.Reason, actorId, UtcNow(), new(actorId, ToAdminAuditAction(type)), cancellationToken));
     }
 
     private async Task<BalanceMutationResultDto> InternalMutationAsync(BalanceMutationCommand command, BalanceLedgerEntryType type, CancellationToken cancellationToken) =>
-        ToDto(await repository.MutateAsync(command.UserId, command.BalanceBucketId, command.OperationId, type, command.Amount, command.Reason, currentActor.UserId, UtcNow(), cancellationToken));
+        ToDto(await repository.MutateAsync(command.UserId, command.BalanceBucketId, command.OperationId, type, command.Amount, command.Reason, currentActor.UserId, UtcNow(), null, cancellationToken));
 
     private Guid RequireActor() => currentActor.UserId ?? throw new UnauthorizedAccessException("Actor is required.");
     private DateTime UtcNow() => timeProvider.GetUtcNow().UtcDateTime;
@@ -61,6 +61,13 @@ public sealed class BalanceService(IBalanceRepository repository, AuthorizationS
         BalanceLedgerEntryType.Refund => "REFUND",
         BalanceLedgerEntryType.Adjustment => "ADJUSTMENT",
         BalanceLedgerEntryType.Expire => "EXPIRE",
+        _ => throw new ArgumentOutOfRangeException(nameof(type))
+    };
+    private static string ToAdminAuditAction(BalanceLedgerEntryType type) => type switch
+    {
+        BalanceLedgerEntryType.Grant => "balance.grant",
+        BalanceLedgerEntryType.Adjustment => "balance.adjust",
+        BalanceLedgerEntryType.Expire => "balance.expire",
         _ => throw new ArgumentOutOfRangeException(nameof(type))
     };
 }

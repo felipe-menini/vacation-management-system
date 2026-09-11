@@ -1,10 +1,12 @@
 using System.Security.Cryptography;
+using System.Text.Json;
+using Licenses.Application.Audit;
 using Licenses.Application.Authorization;
 using Licenses.Domain.LeaveManagement;
 
 namespace Licenses.Application.LeaveManagement;
 
-public sealed class LeaveRequestDocumentService(ILeaveRequestRepository repository, IPrivateDocumentStorage storage, AuthorizationService authorization, ICurrentActor currentActor, TimeProvider timeProvider)
+public sealed class LeaveRequestDocumentService(ILeaveRequestRepository repository, IPrivateDocumentStorage storage, AuthorizationService authorization, ICurrentActor currentActor, TimeProvider timeProvider, IAuditWriter auditWriter)
 {
     public const long DefaultMaxUploadSizeBytes = 10 * 1024 * 1024;
     private static readonly Dictionary<string, string> ExtensionToContentType = new(StringComparer.OrdinalIgnoreCase)
@@ -38,6 +40,13 @@ public sealed class LeaveRequestDocumentService(ILeaveRequestRepository reposito
         var stored = await storage.StoreAsync(storageKey, buffer, cancellationToken);
         var document = LeaveRequestDocument.Create(request.Id, LeaveRequestDocumentKind.MedicalCertificate, originalFileName, validation.ContentType, stored.SizeBytes, stored.StorageKey, stored.Sha256, actorId, UtcNow());
         await repository.AddDocumentAsync(document, cancellationToken);
+        await WriteDocumentAuditAsync("leave.document.upload", document, request, actorId, new
+        {
+            requestId = request.Id,
+            documentKind = ToKind(document.Kind),
+            contentType = document.ContentType,
+            sizeBytes = document.SizeBytes
+        }, cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
         return (await ToDtosAsync([document], cancellationToken)).Single();
     }
@@ -50,7 +59,14 @@ public sealed class LeaveRequestDocumentService(ILeaveRequestRepository reposito
         var request = await repository.GetAsync(document.LeaveRequestId, tracking: false, cancellationToken);
         if (request is null || !await CanReadDocumentsAsync(actorId, request, cancellationToken)) return null;
         var dto = (await ToDtosAsync([document], cancellationToken)).Single();
-        return (dto, await storage.OpenReadAsync(document.StorageKey, document.ContentType, cancellationToken));
+        var content = await storage.OpenReadAsync(document.StorageKey, document.ContentType, cancellationToken);
+        await WriteDocumentAuditAsync("leave.document.read", document, request, actorId, new
+        {
+            requestId = request.Id,
+            documentKind = ToKind(document.Kind)
+        }, cancellationToken);
+        await repository.SaveChangesAsync(cancellationToken);
+        return (dto, content);
     }
 
     private async Task<bool> CanReadDocumentsAsync(Guid actorId, LeaveRequest request, CancellationToken cancellationToken)
@@ -109,6 +125,23 @@ public sealed class LeaveRequestDocumentService(ILeaveRequestRepository reposito
 
     private Guid RequireActor() => currentActor.UserId ?? throw new UnauthorizedAccessException("Actor is required.");
     private DateTime UtcNow() => timeProvider.GetUtcNow().UtcDateTime;
+    private Task WriteDocumentAuditAsync(string action, LeaveRequestDocument document, LeaveRequest request, Guid actorId, object metadata, CancellationToken cancellationToken) =>
+        auditWriter.WriteAsync(new AuditEventData(
+            actorId,
+            action,
+            "LeaveRequestDocument",
+            document.Id,
+            request.UserId,
+            request.OrgUnitId,
+            null,
+            UtcNow(),
+            JsonSerializer.Serialize(metadata, AuditJsonOptions)),
+            cancellationToken);
+
+    private static readonly JsonSerializerOptions AuditJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+    };
     public static string ToKind(LeaveRequestDocumentKind value) => value switch { LeaveRequestDocumentKind.MedicalCertificate => "MEDICAL_CERTIFICATE", _ => throw new ArgumentOutOfRangeException(nameof(value)) };
     public static LeaveRequestDocumentKind FromKind(string value) => value switch { "MEDICAL_CERTIFICATE" => LeaveRequestDocumentKind.MedicalCertificate, _ => throw new ArgumentOutOfRangeException(nameof(value)) };
 }

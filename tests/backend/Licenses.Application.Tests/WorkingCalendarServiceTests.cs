@@ -1,3 +1,5 @@
+using Licenses.Application.Audit;
+using Licenses.Application.Authorization;
 using Licenses.Application.LeaveManagement;
 using Licenses.Domain.LeaveManagement;
 
@@ -6,9 +8,11 @@ namespace Licenses.Application.Tests;
 public sealed class WorkingCalendarServiceTests
 {
     private readonly FakeWorkingCalendarRepository _repository = new();
+    private readonly FakeAuditWriter _audit = new();
+    private readonly Guid _actorId = Guid.NewGuid();
     private readonly WorkingCalendarService _service;
 
-    public WorkingCalendarServiceTests() => _service = new WorkingCalendarService(_repository, TimeProvider.System);
+    public WorkingCalendarServiceTests() => _service = new WorkingCalendarService(_repository, TimeProvider.System, new FixedCurrentActor(_actorId), _audit);
 
     [Fact]
     public async Task CreatesCalendarAndCalculatesBusinessDaysWithExceptions()
@@ -30,6 +34,35 @@ public sealed class WorkingCalendarServiceTests
 
         Assert.Equal(5, result.CalculatedDays);
         await Assert.ThrowsAsync<ArgumentException>(() => _service.CalculateAsync("CALENDAR_DAYS", null, new DateOnly(2026, 8, 14), new DateOnly(2026, 8, 10), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task AdministrativeCalendarMutationsProduceFocusedAuditEvents()
+    {
+        var calendar = await _service.CreateCalendarAsync(new("standard", "Standard", null, true, Weekdays()), CancellationToken.None);
+        await _service.UpdateCalendarAsync(calendar.Id, new("Standard Updated", null, true, Weekdays()), CancellationToken.None);
+        var exception = await _service.CreateExceptionAsync(calendar.Id, new(new DateOnly(2026, 8, 12), "Sample holiday", false), CancellationToken.None);
+        await _service.UpdateExceptionAsync(exception.Id, new(new DateOnly(2026, 8, 13), "Moved holiday", false), CancellationToken.None);
+
+        Assert.Equal([
+            "leave.calendar.create",
+            "leave.calendar.update",
+            "leave.calendar.exception.create",
+            "leave.calendar.exception.update"
+        ], _audit.Events.Select(x => x.Action));
+        Assert.All(_audit.Events, x => Assert.Equal(_actorId, x.ActorUserId));
+        Assert.DoesNotContain(_audit.Events, x => x.MetadataJson?.Contains("Weekdays", StringComparison.OrdinalIgnoreCase) == true);
+    }
+
+    [Fact]
+    public async Task FailedCalendarMutationDoesNotProduceAuditEvent()
+    {
+        await _service.CreateCalendarAsync(new("standard", "Standard", null, true, Weekdays()), CancellationToken.None);
+        _audit.Events.Clear();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _service.CreateCalendarAsync(new("standard", "Duplicate", null, true, Weekdays()), CancellationToken.None));
+
+        Assert.Empty(_audit.Events);
     }
 
     private static List<UpsertWorkingCalendarWeekdayCommand> Weekdays() =>
@@ -56,4 +89,16 @@ public sealed class WorkingCalendarServiceTests
         public Task AddExceptionAsync(WorkingCalendarException exception, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task SaveChangesAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
+
+    private sealed class FakeAuditWriter : IAuditWriter
+    {
+        public List<AuditEventData> Events { get; } = [];
+        public Task WriteAsync(AuditEventData auditEvent, CancellationToken cancellationToken)
+        {
+            Events.Add(auditEvent);
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class FixedCurrentActor(Guid userId) : ICurrentActor { public Guid? UserId => userId; }
 }

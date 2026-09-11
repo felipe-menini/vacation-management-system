@@ -58,3 +58,9 @@ Technical logs support operations and troubleshooting and may rotate. Business a
 - [Authorization](authorization.md)
 - [Integrations](integrations.md)
 - [Roles and permissions](../product/roles-permissions.md)
+
+## Implemented audit trail foundation
+
+EP-12A provides the backend persistence/writer foundation for audit events. Audit answers who did what to which resource, when, and with what minimal context. It is not the source of business truth for balances, approvals, cancellations, revocations, or outbox processing; those remain in their dedicated history tables.
+
+Audit metadata must be intentionally small and privacy-safe. Do not store passwords, tokens, cookies, authorization headers, medical document bytes, private storage keys, uploaded files, complete EF entities, or unnecessary sensitive personal data. Sensitive document access auditing is planned for EP-12B. Audit viewer/search authorization is planned for EP-12C. Retention remains a future RRHH/Legal/compliance decision.

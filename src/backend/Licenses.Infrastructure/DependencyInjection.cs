@@ -1,3 +1,4 @@
+using Licenses.Application.Audit;
 using Licenses.Application.Authorization;
 using Licenses.Application.Organization;
 using Licenses.Infrastructure.Health;
@@ -5,6 +6,7 @@ using Licenses.Application.Notifications;
 using Licenses.Infrastructure.Notifications;
 using Licenses.Infrastructure.LeaveManagement;
 using Licenses.Application.LeaveManagement;
+using Licenses.Infrastructure.Audit;
 using Licenses.Infrastructure.Authorization;
 using Licenses.Infrastructure.Organization;
 using Licenses.Infrastructure.Persistence;
@@ -45,6 +47,8 @@ public static class DependencyInjection
         services.AddScoped<IPrivateDocumentStorage, LocalPrivateDocumentStorage>();
         services.AddScoped<ILeaveRequestRepository, EfLeaveRequestRepository>();
         services.AddScoped<IApplicationEventOutbox, EfApplicationEventOutbox>();
+        services.AddScoped<IAuditWriter, EfAuditWriter>();
+        services.AddScoped<IAuditEventReader, EfAuditEventReader>();
         services.AddScoped<IAuthorizationRepository, EfAuthorizationRepository>();
         services.AddSingleton(TimeProvider.System);
 

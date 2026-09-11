@@ -1,3 +1,4 @@
+using Licenses.Domain.Audit;
 using Licenses.Domain.Authorization;
 using Licenses.Domain.Identity;
 using Licenses.Domain.LeaveManagement;
@@ -31,6 +32,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<LeaveRequestCancellation> LeaveRequestCancellations => Set<LeaveRequestCancellation>();
     public DbSet<LeaveRequestRevocation> LeaveRequestRevocations => Set<LeaveRequestRevocation>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+    public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

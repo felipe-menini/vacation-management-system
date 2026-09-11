@@ -1,6 +1,9 @@
 using System.Net;
+using System.Net.Http.Json;
 using Licenses.Api.Development;
+using Licenses.Application.Audit;
 using Licenses.Application.Authorization;
+using Licenses.Application.Organization;
 using Licenses.Domain.Identity;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -40,6 +43,28 @@ public sealed class AuthorizationEndpointTests(WebApplicationFactory<Program> fa
         using var response = await client.GetAsync("/api/users");
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task UnauthorizedOrganizationMutationDoesNotProduceAuditEvent()
+    {
+        var actorId = Guid.NewGuid();
+        var auditWriter = new CapturingAuditWriter();
+        using var client = factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Testing");
+            builder.ConfigureServices(services =>
+            {
+                services.AddScoped<ICurrentActor>(_ => new FixedCurrentActor(actorId));
+                services.AddScoped<IAuthorizationRepository>(_ => new DenyingAuthorizationRepository(actorId));
+                services.AddScoped<IAuditWriter>(_ => auditWriter);
+            });
+        }).CreateClient();
+
+        using var response = await client.PostAsJsonAsync("/api/org-units", new CreateOrgUnitCommand("Unauthorized", "UNAUTH", Guid.NewGuid()));
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Empty(auditWriter.Events);
     }
 
     [Fact]
@@ -91,5 +116,15 @@ public sealed class AuthorizationEndpointTests(WebApplicationFactory<Program> fa
         public Task<bool> IsRoleActiveAsync(Guid roleId, CancellationToken cancellationToken) => Task.FromResult(false);
         public Task<List<User>> ListUsersInOrgUnitsAsync(IReadOnlyCollection<Guid> orgUnitIds, DateTime utcNow, CancellationToken cancellationToken) => Task.FromResult(new List<User>());
         public Task<List<DevelopmentActorDto>> ListDevelopmentActorsAsync(DateTime utcNow, CancellationToken cancellationToken) => Task.FromResult(new List<DevelopmentActorDto>());
+    }
+
+    private sealed class CapturingAuditWriter : IAuditWriter
+    {
+        public List<AuditEventData> Events { get; } = [];
+        public Task WriteAsync(AuditEventData auditEvent, CancellationToken cancellationToken)
+        {
+            Events.Add(auditEvent);
+            return Task.CompletedTask;
+        }
     }
 }

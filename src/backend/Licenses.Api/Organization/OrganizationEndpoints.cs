@@ -36,7 +36,7 @@ public static class OrganizationEndpoints
             var actorId = actor.UserId;
             if (actorId is null) return Results.Unauthorized();
             if (command.ParentId is null || !await authorization.CanUserPerformAsync(actorId.Value, PermissionCodes.OrgUnitsManage, command.ParentId.Value, cancellationToken)) return Results.StatusCode(StatusCodes.Status403Forbidden);
-            var created = await service.CreateOrgUnitAsync(command, cancellationToken);
+            var created = await service.CreateOrgUnitAsync(command, cancellationToken, actorId.Value);
             return Results.Created($"/api/org-units/{created.Id}", created);
         });
         orgUnits.MapPut("/{id:guid}", async (Guid id, UpdateOrgUnitCommand command, ICurrentActor actor, AuthorizationService authorization, OrganizationService service, CancellationToken cancellationToken) =>
@@ -45,7 +45,7 @@ public static class OrganizationEndpoints
             if (actorId is null) return Results.Unauthorized();
             if (!await authorization.CanUserPerformAsync(actorId.Value, PermissionCodes.OrgUnitsManage, id, cancellationToken)) return Results.StatusCode(StatusCodes.Status403Forbidden);
             if (command.ParentId is not null && !await authorization.CanUserPerformAsync(actorId.Value, PermissionCodes.OrgUnitsManage, command.ParentId.Value, cancellationToken)) return Results.StatusCode(StatusCodes.Status403Forbidden);
-            return await service.UpdateOrgUnitAsync(id, command, cancellationToken) is { } updated ? Results.Ok(updated) : Results.NotFound();
+            return await service.UpdateOrgUnitAsync(id, command, cancellationToken, actorId.Value) is { } updated ? Results.Ok(updated) : Results.NotFound();
         });
 
         var users = app.MapGroup("/api/users").WithTags("Users");
@@ -93,7 +93,7 @@ public static class OrganizationEndpoints
             if (actorId is null) return Results.Unauthorized();
             if (!await authorization.CanAccessUserAsync(actorId.Value, PermissionCodes.OrgAssignmentsManage, id, cancellationToken)) return Results.StatusCode(StatusCodes.Status403Forbidden);
             if (!await authorization.CanUserPerformAsync(actorId.Value, PermissionCodes.OrgAssignmentsManage, command.OrgUnitId, cancellationToken)) return Results.StatusCode(StatusCodes.Status403Forbidden);
-            return await service.CreateAssignmentAsync(id, command, cancellationToken) is { } created ? Results.Created($"/api/users/{id}/org-assignments/{created.Id}", created) : Results.NotFound();
+            return await service.CreateAssignmentAsync(id, command, cancellationToken, actorId.Value) is { } created ? Results.Created($"/api/users/{id}/org-assignments/{created.Id}", created) : Results.NotFound();
         });
 
         return app;

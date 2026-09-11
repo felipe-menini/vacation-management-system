@@ -23,6 +23,9 @@ type LeaveRequestRevocation = { id: string; leaveRequestId: string; revokedByUse
 type LeaveRequestDocument = { id: string; leaveRequestId: string; kind: string; originalFileName: string; contentType: string; sizeBytes: number; sha256: string; uploadedByUserId: string; uploadedByUserDisplayName: string | null; createdAtUtc: string };
 type LeaveRequest = { id: string; userId: string; userDisplayName: string | null; orgUnitId: string; orgUnitCode: string | null; orgUnitName: string | null; leaveTypeId: string; leaveTypeCode: string | null; leaveTypeName: string | null; leavePolicyVersionId: string | null; startDate: string; endDate: string; dayPortion: string; calculatedDays: number | null; status: string; comment: string | null; balanceAccountId: string | null; balanceReservationOperationId: string | null; submissionOperationId: string | null; createdByUserId: string; createdByUserDisplayName: string | null; createdAtUtc: string; submittedAtUtc: string | null; decidedAtUtc: string | null; cancellationRequestedAtUtc: string | null; cancellationDecidedAtUtc: string | null; revokedAtUtc: string | null; decision: LeaveRequestDecision | null; cancellation: LeaveRequestCancellation | null; revocation: LeaveRequestRevocation | null; documents: LeaveRequestDocument[] };
 type SubmitLeaveRequestResult = { request: LeaveRequest; warnings: string[]; wasAlreadySubmitted: boolean };
+type AuditEvent = { id: string; occurredAtUtc: string; action: string; resourceType: string; resourceId: string | null; actorUserId: string | null; actorDisplayName: string | null; subjectUserId: string | null; subjectDisplayName: string | null; orgUnitId: string | null; orgUnitName: string | null; correlationId: string | null; metadataJson: string | null };
+type AuditEventListResult = { items: AuditEvent[]; page: number; pageSize: number; totalCount: number; hasNextPage: boolean };
+type AuditFilters = { action: string; resourceType: string; fromUtc: string; toUtc: string; page: number; pageSize: number };
 
 type StatusCardProps = { label: string; status: HealthStatus };
 type CatalogKind = 'leave-types' | 'balance-buckets';
@@ -159,6 +162,10 @@ export function App() {
   const [requestMessage, setRequestMessage] = useState<string | null>(null);
   const [isRequestSubmitting, setIsRequestSubmitting] = useState(false);
   const [uploadingDocumentRequestId, setUploadingDocumentRequestId] = useState<string | null>(null);
+  const [auditEvents, setAuditEvents] = useState<AuditEventListResult | null>(null);
+  const [auditFilters, setAuditFilters] = useState<AuditFilters>({ action: '', resourceType: '', fromUtc: '', toUtc: '', page: 1, pageSize: 25 });
+  const [auditMessage, setAuditMessage] = useState<string | null>(null);
+  const [canReadAudit, setCanReadAudit] = useState(false);
 
   const selectedActor = useMemo(() => actors.find((actor) => actor.id === selectedActorId) ?? null, [actors, selectedActorId]);
 
@@ -185,6 +192,15 @@ export function App() {
   async function loadMyBalances(actorId: string | null) {
     setMyBalances(await fetchJson<BalanceSnapshot[]>('/balances/me', actorId));
   }
+
+  const loadAuditEvents = useCallback(async (actorId: string | null, filters: AuditFilters = auditFilters) => {
+    const params = new URLSearchParams({ page: String(filters.page), pageSize: String(filters.pageSize) });
+    if (filters.action.trim()) params.set('action', filters.action.trim());
+    if (filters.resourceType.trim()) params.set('resourceType', filters.resourceType.trim());
+    if (filters.fromUtc) params.set('fromUtc', new Date(filters.fromUtc).toISOString());
+    if (filters.toUtc) params.set('toUtc', new Date(filters.toUtc).toISOString());
+    setAuditEvents(await fetchJson<AuditEventListResult>(`/audit-events?${params.toString()}`, actorId));
+  }, [auditFilters]);
 
   async function loadLeaveRequests(actorId: string | null) {
     setMyRequests(await fetchJson<LeaveRequest[]>('/leave-requests/me', actorId));
@@ -322,6 +338,12 @@ export function App() {
       try {
         await loadMyBalances(selectedActorId);
         await loadLeaveRequests(selectedActorId);
+        try {
+          await loadAuditEvents(selectedActorId);
+          if (isMounted) { setCanReadAudit(true); setAuditMessage(null); }
+        } catch (error) {
+          if (isMounted) { setCanReadAudit(false); setAuditEvents(null); setAuditMessage(error instanceof Error ? error.message : 'Unable to load audit events.'); }
+        }
         if (selectedBalanceUserId) await loadUserBalances(selectedBalanceUserId, selectedActorId);
         if (isMounted) setBalanceMessage(null);
       } catch (error) {
@@ -341,11 +363,25 @@ export function App() {
     return () => {
       isMounted = false;
     };
-  }, [loadUserBalances, selectedActorId, selectedBalanceUserId]);
+  }, [loadAuditEvents, loadUserBalances, selectedActorId, selectedBalanceUserId]);
 
   function changeSelectedActor(actorId: string) {
     setSelectedActorId(actorId);
     localStorage.setItem(selectedActorStorageKey, actorId);
+  }
+
+  async function applyAuditFilters(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const nextFilters: AuditFilters = { action: String(data.get('action') ?? ''), resourceType: String(data.get('resourceType') ?? ''), fromUtc: String(data.get('fromUtc') ?? ''), toUtc: String(data.get('toUtc') ?? ''), page: 1, pageSize: auditFilters.pageSize };
+    setAuditFilters(nextFilters);
+    try { await loadAuditEvents(selectedActorId, nextFilters); setAuditMessage(null); } catch (error) { setAuditMessage(error instanceof Error ? error.message : 'Unable to load audit events.'); }
+  }
+
+  async function changeAuditPage(page: number) {
+    const nextFilters = { ...auditFilters, page };
+    setAuditFilters(nextFilters);
+    try { await loadAuditEvents(selectedActorId, nextFilters); setAuditMessage(null); } catch (error) { setAuditMessage(error instanceof Error ? error.message : 'Unable to load audit events.'); }
   }
 
   async function createLeaveType(event: FormEvent<HTMLFormElement>) {
@@ -1130,6 +1166,16 @@ export function App() {
           {resolvedPolicy ? <p className="muted">{resolvedPolicy.found ? `Resolved ${resolvedPolicy.policy?.leaveTypeCode} ${resolvedPolicy.policy?.orgUnitCode ?? 'COMPANY'} v${resolvedPolicy.version?.versionNumber}` : resolvedPolicy.reason}</p> : null}
         </form>
       </section>
+
+      {canReadAudit ? <section className="admin-panel" aria-label="Audit events">
+        <div className="section-heading"><div><p className="eyebrow">Audit</p><h2>Audit events</h2></div>{auditMessage ? <p className="error">{auditMessage}</p> : null}</div>
+        <form className="panel-card catalog-form" onSubmit={applyAuditFilters}>
+          <h3>Filters</h3><input name="action" placeholder="Action" defaultValue={auditFilters.action} /><input name="resourceType" placeholder="Resource type" defaultValue={auditFilters.resourceType} />
+          <label>From <input name="fromUtc" type="datetime-local" defaultValue={auditFilters.fromUtc} /></label><label>To <input name="toUtc" type="datetime-local" defaultValue={auditFilters.toUtc} /></label><button type="submit">Apply filters</button>
+        </form>
+        <div className="catalog-list">{auditEvents?.items.length ? auditEvents.items.map((event) => <details className="version-row" key={event.id}><summary><strong>{new Date(event.occurredAtUtc).toLocaleString()}</strong> <span>{event.action}</span> <span>{event.actorDisplayName ?? event.actorUserId ?? 'System'}</span> <span>{event.subjectDisplayName ?? event.subjectUserId ?? 'No subject'}</span> <span>{event.resourceType}{event.resourceId ? ` / ${event.resourceId}` : ''}</span> <span>{event.orgUnitName ?? 'Global'}</span></summary><pre>{event.metadataJson ? JSON.stringify(JSON.parse(event.metadataJson), null, 2) : 'No metadata'}</pre>{event.correlationId ? <p className="muted">Correlation: {event.correlationId}</p> : null}</details>) : <p className="muted">No audit events visible for the selected filters.</p>}</div>
+        {auditEvents ? <div className="inline-form"><button type="button" disabled={auditEvents.page <= 1} onClick={() => void changeAuditPage(auditEvents.page - 1)}>Previous</button><span>Page {auditEvents.page} · {auditEvents.totalCount} events</span><button type="button" disabled={!auditEvents.hasNextPage} onClick={() => void changeAuditPage(auditEvents.page + 1)}>Next</button></div> : null}
+      </section> : null}
 
       <section className="admin-panel" aria-label="Development organization admin">
         <div>

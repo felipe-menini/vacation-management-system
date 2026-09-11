@@ -1,4 +1,5 @@
 using System.Data;
+using Licenses.Application.Audit;
 using Licenses.Application.LeaveManagement;
 using Licenses.Domain.Identity;
 using Licenses.Domain.LeaveManagement;
@@ -7,7 +8,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Licenses.Infrastructure.LeaveManagement;
 
-public sealed class EfBalanceRepository(ApplicationDbContext dbContext) : IBalanceRepository
+public sealed class EfBalanceRepository(ApplicationDbContext dbContext, IAuditWriter auditWriter) : IBalanceRepository
 {
     public Task<User?> GetUserAsync(Guid userId, CancellationToken cancellationToken) =>
         dbContext.Users.AsNoTracking().FirstOrDefaultAsync(x => x.Id == userId, cancellationToken);
@@ -42,7 +43,7 @@ public sealed class EfBalanceRepository(ApplicationDbContext dbContext) : IBalan
             .ToListAsync(cancellationToken);
     }
 
-    public async Task<BalanceMutationRecord> MutateAsync(Guid userId, Guid balanceBucketId, Guid operationId, BalanceLedgerEntryType type, decimal amount, string reason, Guid? createdByUserId, DateTime createdAtUtc, CancellationToken cancellationToken)
+    public async Task<BalanceMutationRecord> MutateAsync(Guid userId, Guid balanceBucketId, Guid operationId, BalanceLedgerEntryType type, decimal amount, string reason, Guid? createdByUserId, DateTime createdAtUtc, BalanceMutationAuditContext? auditContext, CancellationToken cancellationToken)
     {
         var (availableDelta, reservedDelta) = BalanceLedgerEntry.GetDeltas(type, amount);
         reason = NormalizeReason(reason);
@@ -70,6 +71,27 @@ public sealed class EfBalanceRepository(ApplicationDbContext dbContext) : IBalan
 
         var entry = BalanceLedgerEntry.Create(account.Id, operationId, type, availableDelta, reservedDelta, reason, createdByUserId, createdAtUtc);
         await dbContext.BalanceLedgerEntries.AddAsync(entry, cancellationToken);
+        if (auditContext is not null)
+        {
+            await auditWriter.WriteAsync(new AuditEventData(
+                auditContext.ActorUserId,
+                auditContext.Action,
+                "BalanceAccount",
+                account.Id,
+                userId,
+                null,
+                operationId,
+                createdAtUtc,
+                AuditMetadataJson.Serialize(new
+                {
+                    balanceBucketId,
+                    ledgerEntryId = entry.Id,
+                    operationType = ToTypeCode(type),
+                    amount,
+                    availableDelta,
+                    reservedDelta
+                })), cancellationToken);
+        }
         await dbContext.SaveChangesAsync(cancellationToken);
         if (ownsTransaction) await transaction!.CommitAsync(cancellationToken);
 
@@ -124,4 +146,16 @@ public sealed class EfBalanceRepository(ApplicationDbContext dbContext) : IBalan
         if (normalized.Length > BalanceLedgerEntry.ReasonMaxLength) throw new ArgumentException($"Reason cannot exceed {BalanceLedgerEntry.ReasonMaxLength} characters.", nameof(reason));
         return normalized;
     }
+
+    private static string ToTypeCode(BalanceLedgerEntryType type) => type switch
+    {
+        BalanceLedgerEntryType.Grant => "GRANT",
+        BalanceLedgerEntryType.Reserve => "RESERVE",
+        BalanceLedgerEntryType.Release => "RELEASE",
+        BalanceLedgerEntryType.Consume => "CONSUME",
+        BalanceLedgerEntryType.Refund => "REFUND",
+        BalanceLedgerEntryType.Adjustment => "ADJUSTMENT",
+        BalanceLedgerEntryType.Expire => "EXPIRE",
+        _ => throw new ArgumentOutOfRangeException(nameof(type))
+    };
 }
