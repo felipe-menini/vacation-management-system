@@ -34,6 +34,13 @@ public static class DependencyInjection
         services.AddScoped<ILeavePolicyRepository, EfLeavePolicyRepository>();
         services.AddScoped<IWorkingCalendarRepository, EfWorkingCalendarRepository>();
         services.AddScoped<IBalanceRepository, EfBalanceRepository>();
+        services.Configure<PrivateDocumentStorageOptions>(options =>
+        {
+            var section = configuration.GetSection("PrivateDocumentStorage");
+            options.RootPath = section["RootPath"] ?? options.RootPath;
+            if (long.TryParse(section["MaxUploadSizeBytes"], out var maxUploadSizeBytes)) options.MaxUploadSizeBytes = maxUploadSizeBytes;
+        });
+        services.AddScoped<IPrivateDocumentStorage, LocalPrivateDocumentStorage>();
         services.AddScoped<ILeaveRequestRepository, EfLeaveRequestRepository>();
         services.AddScoped<IAuthorizationRepository, EfAuthorizationRepository>();
         services.AddSingleton(TimeProvider.System);

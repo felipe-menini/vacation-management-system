@@ -23,8 +23,11 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__ApplicationDb: Host=postgres;Port=5432;Database=${POSTGRES_DB:-licenses};Username=${POSTGRES_USER:-licenses};Password=${POSTGRES_PASSWORD:-change-me}
+      PrivateDocumentStorage__RootPath: /var/lib/licenses/private-documents
     ports:
       - "${API_PORT:-5080}:8080"
+    volumes:
+      - private-documents-data:/var/lib/licenses/private-documents
     depends_on:
       postgres:
         condition: service_healthy
@@ -59,3 +62,4 @@ services:
 
 volumes:
   postgres-data:
+  private-documents-data:

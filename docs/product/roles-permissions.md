@@ -126,3 +126,17 @@ EP-09 adds:
 Development seed grants these EP-09 scoped lifecycle permissions to Supervisor, Manager, and HR. Technical Administrator still receives no automatic business request permission.
 
 Cancellation decision and revocation are prohibited on the actor's own request even when the actor has the permission. Manual create-for-others submits through the same policy, calculation, overlap, and balance path as employee submission.
+
+## Implemented leave document permissions
+
+EP-10 adds:
+
+| Permission | Description |
+| --- | --- |
+| `leave.documents.read.self` | Read documents attached to own leave requests. |
+| `leave.documents.upload.self` | Upload documents to own leave requests. |
+| `leave.documents.read` | Read leave request documents inside authorized organizational scope. |
+
+Development seed grants own read/upload to Employee, Supervisor, Manager, and HR. Supervisor, Manager, and HR receive scoped document read. Technical Administrator receives no automatic medical document access.
+
+Scoped document access is authorized independently from ordinary request visibility and uses the leave request's stored `OrgUnitId`, not the employee's current assignment.

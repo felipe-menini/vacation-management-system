@@ -33,6 +33,7 @@ builder.Services.AddScoped<LeavePolicyService>();
 builder.Services.AddScoped<WorkingCalendarService>();
 builder.Services.AddScoped<BalanceService>();
 builder.Services.AddScoped<LeaveRequestService>();
+builder.Services.AddScoped<LeaveRequestDocumentService>();
 
 var app = builder.Build();
 
@@ -64,6 +65,7 @@ app.MapLeavePolicyEndpoints();
 app.MapWorkingCalendarEndpoints();
 app.MapBalanceEndpoints();
 app.MapLeaveRequestEndpoints();
+app.MapLeaveRequestDocumentEndpoints();
 
 app.Run();
 

@@ -95,3 +95,7 @@ EP-07 implements `LeaveRequest` as the aggregate for employee-owned drafts and s
 EP-08 adds `LeaveRequestDecision` as immutable business history for one final decision per request. The implemented state machine is intentionally narrow: `PENDING_APPROVAL -> APPROVED` and `PENDING_APPROVAL -> REJECTED`.
 
 Approval and rejection use explicit domain operations, not a generic status setter. Self-approval is prohibited. Decision scope is evaluated against the request's stored `OrgUnitId`. Multi-step workflows, routing tables, delegation, and quorum rules are intentionally deferred.
+
+## Implemented leave request documents
+
+EP-10 adds `LeaveRequestDocument` as immutable metadata for private leave-request attachments. EP-10 supports `MEDICAL_CERTIFICATE`; future document kinds can add new controlled values without changing storage internals. Document bytes are not part of the domain model and are retrieved only through a private storage abstraction.
