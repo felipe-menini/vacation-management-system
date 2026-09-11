@@ -48,6 +48,14 @@ public sealed class AuthorizationService(IAuthorizationRepository repository, Ti
         return result;
     }
 
+
+    public async Task<bool> CanUserReadGlobalScopedResourceAsync(Guid actorUserId, string permissionCode, CancellationToken cancellationToken)
+    {
+        var allowedOrgUnits = await GetAuthorizedOrgUnitIdsAsync(actorUserId, permissionCode, cancellationToken);
+        if (allowedOrgUnits.Count == 0) return false;
+        var rootOrgUnits = (await repository.ListOrgUnitsAsync(cancellationToken)).Where(x => x.IsActive && x.ParentId is null).Select(x => x.Id).ToHashSet();
+        return rootOrgUnits.Any(allowedOrgUnits.Contains);
+    }
     public async Task<bool> CanAccessUserAsync(Guid actorUserId, string permissionCode, Guid targetUserId, CancellationToken cancellationToken)
     {
         var allowedOrgUnits = await GetAuthorizedOrgUnitIdsAsync(actorUserId, permissionCode, cancellationToken);

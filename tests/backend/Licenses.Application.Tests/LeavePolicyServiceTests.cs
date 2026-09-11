@@ -1,3 +1,5 @@
+using Licenses.Application.Audit;
+using Licenses.Application.Authorization;
 using Licenses.Application.LeaveManagement;
 using Licenses.Domain.LeaveManagement;
 using Licenses.Domain.Organization;
@@ -7,10 +9,12 @@ namespace Licenses.Application.Tests;
 public sealed class LeavePolicyServiceTests
 {
     private readonly FakeLeavePolicyRepository _repository = new();
+    private readonly FakeAuditWriter _audit = new();
+    private readonly Guid _actorId = Guid.NewGuid();
     private static readonly Guid TestWorkingCalendarId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
     private readonly LeavePolicyService _service;
 
-    public LeavePolicyServiceTests() => _service = new LeavePolicyService(_repository, TimeProvider.System);
+    public LeavePolicyServiceTests() => _service = new LeavePolicyService(_repository, TimeProvider.System, new FixedCurrentActor(_actorId), _audit);
 
     [Fact]
     public async Task CreatesCompanyPolicyAndRejectsDuplicateExactScope()
@@ -21,6 +25,45 @@ public sealed class LeavePolicyServiceTests
         Assert.False(created.AppliesToDescendants);
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => _service.CreatePolicyAsync(new(leaveType.Id, null, false, null), CancellationToken.None));
         Assert.Contains("already exists", ex.Message);
+    }
+
+    [Fact]
+    public async Task AdministrativePolicyMutationsProduceFocusedAuditEvents()
+    {
+        var leaveType = _repository.AddLeaveType("VACATION", true);
+        var bucket = _repository.AddBucket("VACATION_DAYS", true);
+
+        var policy = await _service.CreatePolicyAsync(new(leaveType.Id, null, false, null), CancellationToken.None);
+        await _service.UpdatePolicyAsync(policy.Id, new(null, false, true), CancellationToken.None);
+        var version = await _service.CreateVersionAsync(policy.Id, Command(consumesBalance: true, balanceBucketId: bucket.Id), CancellationToken.None);
+        await _service.UpdateVersionAsync(version.Id, new(version.EffectiveFrom, null, "BUSINESS_DAYS", true, 7, "CALENDAR_DAYS", 15m, "BLOCK", true, bucket.Id, TestWorkingCalendarId), CancellationToken.None);
+        await _service.PublishVersionAsync(version.Id, CancellationToken.None);
+
+        Assert.Equal([
+            "leave.policy.create",
+            "leave.policy.update",
+            "leave.policy.version.create",
+            "leave.policy.version.update",
+            "leave.policy.version.publish"
+        ], _audit.Events.Select(x => x.Action));
+        Assert.All(_audit.Events, x => Assert.Equal(_actorId, x.ActorUserId));
+        Assert.DoesNotContain(_audit.Events, x => x.MetadataJson?.Contains("Versions", StringComparison.OrdinalIgnoreCase) == true);
+    }
+
+    [Fact]
+    public async Task FailedPolicyPublishDoesNotProduceAuditEvent()
+    {
+        var leaveType = _repository.AddLeaveType("VACATION", true);
+        var bucket = _repository.AddBucket("VACATION_DAYS", true);
+        var policy = await _service.CreatePolicyAsync(new(leaveType.Id, null, false, null), CancellationToken.None);
+        var published = await _service.CreateVersionAsync(policy.Id, Command(consumesBalance: true, balanceBucketId: bucket.Id), CancellationToken.None);
+        await _service.PublishVersionAsync(published.Id, CancellationToken.None);
+        var overlapping = await _service.CreateVersionAsync(policy.Id, Command(effectiveFrom: new DateOnly(2026, 6, 1), consumesBalance: true, balanceBucketId: bucket.Id), CancellationToken.None);
+        _audit.Events.Clear();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _service.PublishVersionAsync(overlapping.Id, CancellationToken.None));
+
+        Assert.Empty(_audit.Events);
     }
 
     [Fact]
@@ -314,6 +357,18 @@ public sealed class LeavePolicyServiceTests
         public Task<List<OrgUnit>> ListOrgUnitsAsync(CancellationToken cancellationToken) => Task.FromResult(_orgs.ToList());
         public Task SaveChangesAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
+
+    private sealed class FakeAuditWriter : IAuditWriter
+    {
+        public List<AuditEventData> Events { get; } = [];
+        public Task WriteAsync(AuditEventData auditEvent, CancellationToken cancellationToken)
+        {
+            Events.Add(auditEvent);
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class FixedCurrentActor(Guid userId) : ICurrentActor { public Guid? UserId => userId; }
 }
 
 

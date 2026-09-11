@@ -99,3 +99,9 @@ Approval and rejection use explicit domain operations, not a generic status sett
 ## Implemented leave request documents
 
 EP-10 adds `LeaveRequestDocument` as immutable metadata for private leave-request attachments. EP-10 supports `MEDICAL_CERTIFICATE`; future document kinds can add new controlled values without changing storage internals. Document bytes are not part of the domain model and are retrieved only through a private storage abstraction.
+
+## Implemented audit event model
+
+EP-12A implements `AuditEvent` as a generic immutable audit record. It records nullable actor user, action, stable business resource type/id, optional subject user, optional org unit, correlation id, UTC occurrence timestamp, and optional privacy-safe JSON metadata.
+
+The audit trail complements existing immutable business history instead of duplicating entire domain entities or replacing ledger/decision/cancellation/revocation/outbox evidence.

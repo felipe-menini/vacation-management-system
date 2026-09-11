@@ -86,3 +86,11 @@ The table uses conservative foreign keys to `leave_requests` and `users`, a cont
 EP-11 adds `licenses.outbox_messages` as the transactional handoff for outbound workflow notifications. Leave workflow services persist lifecycle event payloads in the same PostgreSQL transaction as the business state change, so rolled-back workflows leave no message and committed workflows can be processed later.
 
 Outbox rows store event type, simple JSON payload, occurrence/creation timestamps, idempotency correlation, and processing metadata. `EventType + CorrelationId` is unique to align with existing workflow operation IDs and prevent duplicate messages on idempotent retries. `Licenses.Worker` claims eligible rows with PostgreSQL `FOR UPDATE SKIP LOCKED`, stores processing leases, marks successful messages processed, schedules bounded exponential retry after failures, and dead-letters messages that reach the configured attempt limit. Real Microsoft delivery is deferred until tenant configuration is available and will implement the existing provider-neutral sender abstraction.
+
+## Implemented audit trail foundation
+
+EP-12A adds `licenses.audit_events` as the append-only PostgreSQL audit trail foundation. Audit events are additional evidence and do not replace immutable business history tables such as balance ledger entries, leave request decisions, cancellation/revocation rows, or notification outbox history.
+
+Audit rows store actor, action, stable business resource type/id, optional subject user, optional org unit, correlation id, occurrence timestamp, and minimal JSONB metadata. PostgreSQL rejects direct `UPDATE` and `DELETE`; future workflow integrations can persist audit rows with the same `ApplicationDbContext` transaction as the business mutation.
+
+Audit retention, purge jobs, exports, SIEM integration, and viewer/search APIs are deferred.

@@ -70,6 +70,58 @@ public sealed class BalanceServiceTests
     }
 
     [Fact]
+    public async Task AdministrativeBalanceMutationsRequestAuditButInternalWorkflowMutationsDoNot()
+    {
+        var actor = Guid.NewGuid();
+        var user = Guid.NewGuid();
+        var bucket = Guid.NewGuid();
+        var repo = new FakeBalanceRepository(user, bucket);
+        var service = CreateService(repo, actor, [PermissionCodes.LeaveBalancesManage]);
+
+        await service.GrantAsync(Command(user, bucket, 10m), CancellationToken.None);
+        await service.AdjustAsync(Command(user, bucket, 2m), CancellationToken.None);
+        await service.ExpireAsync(Command(user, bucket, 1m), CancellationToken.None);
+        await service.ReserveAsync(Command(user, bucket, 2m), CancellationToken.None);
+        await service.ConsumeAsync(Command(user, bucket, 1m), CancellationToken.None);
+        await service.RefundAsync(Command(user, bucket, 1m), CancellationToken.None);
+        await service.ReleaseAsync(Command(user, bucket, 1m), CancellationToken.None);
+
+        Assert.Equal(["balance.grant", "balance.adjust", "balance.expire"], repo.AuditContexts.Where(x => x is not null).Select(x => x!.Action));
+        Assert.All(repo.AuditContexts.Where(x => x is not null), x => Assert.Equal(actor, x!.ActorUserId));
+        Assert.Equal(4, repo.AuditContexts.Count(x => x is null));
+    }
+
+    [Fact]
+    public async Task FailedAdministrativeBalanceMutationDoesNotRequestAudit()
+    {
+        var actor = Guid.NewGuid();
+        var user = Guid.NewGuid();
+        var bucket = Guid.NewGuid();
+        var repo = new FakeBalanceRepository(user, bucket);
+        var service = CreateService(repo, actor, [PermissionCodes.LeaveBalancesManage]);
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => service.GrantAsync(Command(user, bucket, 0m), CancellationToken.None)!);
+
+        Assert.Empty(repo.AuditContexts);
+    }
+
+    [Fact]
+    public async Task IdempotentAdministrativeRetryDoesNotRequestDuplicateAudit()
+    {
+        var actor = Guid.NewGuid();
+        var user = Guid.NewGuid();
+        var bucket = Guid.NewGuid();
+        var repo = new FakeBalanceRepository(user, bucket);
+        var service = CreateService(repo, actor, [PermissionCodes.LeaveBalancesManage]);
+        var operationId = Guid.NewGuid();
+
+        await service.GrantAsync(new(user, bucket, operationId, 5m, "same"), CancellationToken.None);
+        await service.GrantAsync(new(user, bucket, operationId, 5m, "same"), CancellationToken.None);
+
+        Assert.Single(repo.AuditContexts, x => x is not null);
+    }
+
+    [Fact]
     public async Task InactiveBucketRulesAllowHistoricalSettlementButBlockNewGrantAndReserve()
     {
         var actor = Guid.NewGuid();
@@ -117,13 +169,14 @@ public sealed class BalanceServiceTests
         private readonly Dictionary<Guid, (Guid UserId, Guid BucketId, BalanceLedgerEntryType Type, decimal Available, decimal Reserved, string Reason, Guid EntryId)> _operations = [];
         private decimal _available;
         private decimal _reserved;
+        public List<BalanceMutationAuditContext?> AuditContexts { get; } = [];
         public bool IsBucketActive { get; set; } = true;
         public bool HasAccount { get; set; }
         public void SetBalances(decimal available, decimal reserved) { _available = available; _reserved = reserved; }
         public Task<User?> GetUserAsync(Guid id, CancellationToken cancellationToken) => Task.FromResult<User?>(null);
         public Task<IReadOnlyList<BalanceSnapshotRecord>> ListSnapshotsAsync(Guid id, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<BalanceSnapshotRecord>>([Snapshot()]);
         public Task<IReadOnlyList<BalanceLedgerEntryRecord>?> ListLedgerAsync(Guid id, Guid b, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<BalanceLedgerEntryRecord>?>([]);
-        public Task<BalanceMutationRecord> MutateAsync(Guid id, Guid b, Guid op, BalanceLedgerEntryType type, decimal amount, string reason, Guid? by, DateTime at, CancellationToken ct)
+        public Task<BalanceMutationRecord> MutateAsync(Guid id, Guid b, Guid op, BalanceLedgerEntryType type, decimal amount, string reason, Guid? by, DateTime at, BalanceMutationAuditContext? auditContext, CancellationToken ct)
         {
             var (ad, rd) = BalanceLedgerEntry.GetDeltas(type, amount);
             if (_operations.TryGetValue(op, out var existing))
@@ -138,6 +191,7 @@ public sealed class BalanceServiceTests
             _available += ad; _reserved += rd;
             var entryId = Guid.NewGuid();
             _operations[op] = (id, b, type, ad, rd, reason, entryId);
+            AuditContexts.Add(auditContext);
             return Task.FromResult(new BalanceMutationRecord(entryId, op, Snapshot(), false));
         }
         private BalanceSnapshotRecord Snapshot() => new(userId, bucketId, "VACATION_DAYS", "Vacation Days", BalanceBucketUnit.Day, _available, _reserved);

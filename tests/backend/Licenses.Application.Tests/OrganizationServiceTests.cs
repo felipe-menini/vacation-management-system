@@ -1,3 +1,4 @@
+using Licenses.Application.Audit;
 using Licenses.Application.Organization;
 using Licenses.Domain.Identity;
 using Licenses.Domain.Organization;
@@ -8,10 +9,11 @@ public sealed class OrganizationServiceTests
 {
     private readonly OrganizationService _service;
     private readonly FakeOrganizationRepository _repository = new();
+    private readonly FakeAuditWriter _auditWriter = new();
 
     public OrganizationServiceTests()
     {
-        _service = new OrganizationService(_repository, TimeProvider.System);
+        _service = new OrganizationService(_repository, TimeProvider.System, _auditWriter);
     }
 
     [Fact]
@@ -79,6 +81,72 @@ public sealed class OrganizationServiceTests
         Assert.Contains("primary", ex.Message);
     }
 
+    [Fact]
+    public async Task OrgUnitCreateAndUpdateProduceFocusedAuditEvents()
+    {
+        var actorId = Guid.NewGuid();
+
+        var company = await _service.CreateOrgUnitAsync(new("Company", "COMPANY", null), CancellationToken.None, actorId);
+        var updated = await _service.UpdateOrgUnitAsync(company.Id, new("Company Updated", "COMPANY2", null, false), CancellationToken.None, actorId);
+
+        Assert.NotNull(updated);
+        Assert.Collection(_auditWriter.Events,
+            created =>
+            {
+                Assert.Equal("organization.unit.create", created.Action);
+                Assert.Equal("OrgUnit", created.ResourceType);
+                Assert.Equal(company.Id, created.ResourceId);
+                Assert.Equal(company.Id, created.OrgUnitId);
+                Assert.Equal(actorId, created.ActorUserId);
+                Assert.Null(created.SubjectUserId);
+                Assert.Contains("COMPANY", created.MetadataJson);
+            },
+            deactivated =>
+            {
+                Assert.Equal("organization.unit.deactivate", deactivated.Action);
+                Assert.Equal("OrgUnit", deactivated.ResourceType);
+                Assert.Equal(company.Id, deactivated.ResourceId);
+                Assert.Equal(company.Id, deactivated.OrgUnitId);
+                Assert.Equal(actorId, deactivated.ActorUserId);
+                Assert.Contains("COMPANY2", deactivated.MetadataJson);
+                Assert.Contains("previousIsActive", deactivated.MetadataJson);
+            });
+    }
+
+    [Fact]
+    public async Task UserOrgAssignmentCreateProducesFocusedAuditEvent()
+    {
+        var actorId = Guid.NewGuid();
+        var effectiveFrom = DateTime.UtcNow.AddDays(-1);
+        var orgUnit = await _service.CreateOrgUnitAsync(new("IT", "IT", null), CancellationToken.None, actorId);
+        var user = await _service.CreateUserAsync(new("Subject", "subject@example.test", null), CancellationToken.None);
+        _auditWriter.Events.Clear();
+
+        var assignment = await _service.CreateAssignmentAsync(user.Id, new(orgUnit.Id, true, effectiveFrom, null), CancellationToken.None, actorId);
+
+        Assert.NotNull(assignment);
+        var auditEvent = Assert.Single(_auditWriter.Events);
+        Assert.Equal("organization.assignment.create", auditEvent.Action);
+        Assert.Equal("UserOrgAssignment", auditEvent.ResourceType);
+        Assert.Equal(assignment!.Id, auditEvent.ResourceId);
+        Assert.Equal(actorId, auditEvent.ActorUserId);
+        Assert.Equal(user.Id, auditEvent.SubjectUserId);
+        Assert.Equal(orgUnit.Id, auditEvent.OrgUnitId);
+        Assert.Contains("isPrimary", auditEvent.MetadataJson);
+    }
+
+    [Fact]
+    public async Task FailedOrganizationMutationDoesNotProduceAuditEvent()
+    {
+        await _service.CreateOrgUnitAsync(new("Company", "COMPANY", null), CancellationToken.None, Guid.NewGuid());
+        _auditWriter.Events.Clear();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _service.CreateOrgUnitAsync(new("Other", "company", null), CancellationToken.None, Guid.NewGuid()));
+
+        Assert.Empty(_auditWriter.Events);
+    }
+
     private sealed class FakeOrganizationRepository : IOrganizationRepository
     {
         private readonly List<OrgUnit> _orgUnits = [];
@@ -115,5 +183,15 @@ public sealed class OrganizationServiceTests
                 && (x.EffectiveToUtc ?? DateTime.MaxValue) > effectiveFromUtc));
         public Task AddAssignmentAsync(UserOrgAssignment assignment, CancellationToken cancellationToken) { _assignments.Add(assignment); return Task.CompletedTask; }
         public Task SaveChangesAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class FakeAuditWriter : IAuditWriter
+    {
+        public List<AuditEventData> Events { get; } = [];
+        public Task WriteAsync(AuditEventData auditEvent, CancellationToken cancellationToken)
+        {
+            Events.Add(auditEvent);
+            return Task.CompletedTask;
+        }
     }
 }

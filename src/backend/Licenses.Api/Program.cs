@@ -1,3 +1,4 @@
+using Licenses.Api.Audit;
 using Licenses.Api.Development;
 using Licenses.Api.Health;
 using Licenses.Api.LeaveManagement;
@@ -66,6 +67,7 @@ app.MapWorkingCalendarEndpoints();
 app.MapBalanceEndpoints();
 app.MapLeaveRequestEndpoints();
 app.MapLeaveRequestDocumentEndpoints();
+app.MapAuditEventEndpoints();
 
 app.Run();
 

@@ -15,8 +15,8 @@ public sealed class BalancePersistenceTests
         await PostgreSqlTestDatabase.WithFreshDatabaseAsync(async db =>
         {
             var (user, bucket) = await SeedUserAndBucketAsync(db);
-            var repo = new EfBalanceRepository(db);
-            await repo.MutateAsync(user.Id, bucket.Id, Guid.NewGuid(), BalanceLedgerEntryType.Grant, 10m, "Initial grant", user.Id, DateTime.UtcNow, CancellationToken.None);
+            var repo = new EfBalanceRepository(db, new Licenses.Infrastructure.Audit.EfAuditWriter(db));
+            await repo.MutateAsync(user.Id, bucket.Id, Guid.NewGuid(), BalanceLedgerEntryType.Grant, 10m, "Initial grant", user.Id, DateTime.UtcNow, null, CancellationToken.None);
             var account = await db.BalanceAccounts.SingleAsync();
             var entry = await db.BalanceLedgerEntries.SingleAsync();
 
@@ -37,17 +37,17 @@ public sealed class BalancePersistenceTests
         await PostgreSqlTestDatabase.WithFreshDatabaseAsync(async (db, connectionString) =>
         {
             var (user, bucket) = await SeedUserAndBucketAsync(db);
-            var repo = new EfBalanceRepository(db);
-            await repo.MutateAsync(user.Id, bucket.Id, Guid.NewGuid(), BalanceLedgerEntryType.Grant, 10m, "Initial grant", user.Id, DateTime.UtcNow, CancellationToken.None);
+            var repo = new EfBalanceRepository(db, new Licenses.Infrastructure.Audit.EfAuditWriter(db));
+            await repo.MutateAsync(user.Id, bucket.Id, Guid.NewGuid(), BalanceLedgerEntryType.Grant, 10m, "Initial grant", user.Id, DateTime.UtcNow, null, CancellationToken.None);
 
             async Task<bool> ReserveAsync()
             {
                 var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseNpgsql(connectionString).Options;
                 await using var context = new ApplicationDbContext(options);
-                var localRepo = new EfBalanceRepository(context);
+                var localRepo = new EfBalanceRepository(context, new Licenses.Infrastructure.Audit.EfAuditWriter(context));
                 try
                 {
-                    await localRepo.MutateAsync(user.Id, bucket.Id, Guid.NewGuid(), BalanceLedgerEntryType.Reserve, 8m, "Concurrent reserve", user.Id, DateTime.UtcNow, CancellationToken.None);
+                    await localRepo.MutateAsync(user.Id, bucket.Id, Guid.NewGuid(), BalanceLedgerEntryType.Reserve, 8m, "Concurrent reserve", user.Id, DateTime.UtcNow, null, CancellationToken.None);
                     return true;
                 }
                 catch (InvalidOperationException)

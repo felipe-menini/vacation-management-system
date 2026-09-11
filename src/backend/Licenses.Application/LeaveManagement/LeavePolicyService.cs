@@ -1,9 +1,11 @@
+using Licenses.Application.Audit;
+using Licenses.Application.Authorization;
 using Licenses.Domain.LeaveManagement;
 using Licenses.Domain.Organization;
 
 namespace Licenses.Application.LeaveManagement;
 
-public sealed class LeavePolicyService(ILeavePolicyRepository repository, TimeProvider timeProvider)
+public sealed class LeavePolicyService(ILeavePolicyRepository repository, TimeProvider timeProvider, ICurrentActor? currentActor = null, IAuditWriter? auditWriter = null)
 {
     public async Task<IReadOnlyList<LeavePolicyDto>> ListPoliciesAsync(CancellationToken cancellationToken)
     {
@@ -26,6 +28,7 @@ public sealed class LeavePolicyService(ILeavePolicyRepository repository, TimePr
 
         var policy = LeavePolicy.Create(leaveType.Id, command.OrgUnitId, command.AppliesToDescendants, command.IsActive ?? true, UtcNow());
         await repository.AddPolicyAsync(policy, cancellationToken);
+        await WritePolicyAuditAsync("leave.policy.create", policy, cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
         return (await ToPolicyDtosAsync([policy], cancellationToken)).Single();
     }
@@ -40,6 +43,7 @@ public sealed class LeavePolicyService(ILeavePolicyRepository repository, TimePr
         if (await repository.ExactPolicyScopeExistsAsync(policy.LeaveTypeId, command.OrgUnitId, id, cancellationToken)) throw new InvalidOperationException("A policy already exists for this leave type and exact scope.");
 
         policy.UpdateScope(command.OrgUnitId, command.AppliesToDescendants, command.IsActive, UtcNow());
+        await WritePolicyAuditAsync("leave.policy.update", policy, cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
         return (await ToPolicyDtosAsync([policy], cancellationToken)).Single();
     }
@@ -67,6 +71,7 @@ public sealed class LeavePolicyService(ILeavePolicyRepository repository, TimePr
         var nextVersion = await repository.GetNextVersionNumberAsync(policyId, cancellationToken);
         var version = LeavePolicyVersion.CreateDraft(policyId, nextVersion, command.EffectiveFrom, command.EffectiveTo, dayCountMode, command.AllowHalfDay, command.MinimumNoticeDays, noticeDayCountMode, command.MaximumRequestDays, ParseOverlapBehavior(command.OverlapBehavior), command.ConsumesBalance, command.BalanceBucketId, command.WorkingCalendarId, UtcNow());
         await repository.AddVersionAsync(version, cancellationToken);
+        await WriteVersionAuditAsync("leave.policy.version.create", policy, version, cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
         return (await ToVersionDtosAsync([version], cancellationToken)).Single();
     }
@@ -80,6 +85,7 @@ public sealed class LeavePolicyService(ILeavePolicyRepository repository, TimePr
         var noticeDayCountMode = ParseDayCountMode(command.NoticeDayCountMode);
         await ValidateRuleReferencesAsync(policy, dayCountMode, noticeDayCountMode, command.ConsumesBalance, command.BalanceBucketId, command.WorkingCalendarId, requireActiveForPublish: false, cancellationToken);
         version.UpdateDraft(command.EffectiveFrom, command.EffectiveTo, dayCountMode, command.AllowHalfDay, command.MinimumNoticeDays, noticeDayCountMode, command.MaximumRequestDays, ParseOverlapBehavior(command.OverlapBehavior), command.ConsumesBalance, command.BalanceBucketId, command.WorkingCalendarId, UtcNow());
+        await WriteVersionAuditAsync("leave.policy.version.update", policy, version, cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
         return (await ToVersionDtosAsync([version], cancellationToken)).Single();
     }
@@ -93,6 +99,7 @@ public sealed class LeavePolicyService(ILeavePolicyRepository repository, TimePr
         await ValidateRuleReferencesAsync(policy, version.DayCountMode, version.NoticeDayCountMode, version.ConsumesBalance, version.BalanceBucketId, version.WorkingCalendarId, requireActiveForPublish: true, cancellationToken);
         if (await repository.HasOverlappingPublishedVersionAsync(version.LeavePolicyId, version.EffectiveFrom, version.EffectiveTo, version.Id, cancellationToken)) throw new InvalidOperationException("Published policy effective periods cannot overlap.");
         version.Publish(UtcNow());
+        await WriteVersionAuditAsync("leave.policy.version.publish", policy, version, cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
         return (await ToVersionDtosAsync([version], cancellationToken)).Single();
     }
@@ -190,5 +197,48 @@ public sealed class LeavePolicyService(ILeavePolicyRepository repository, TimePr
     private static string ToDayCountCode(PolicyDayCountMode mode) => mode switch { PolicyDayCountMode.BusinessDays => "BUSINESS_DAYS", PolicyDayCountMode.CalendarDays => "CALENDAR_DAYS", _ => throw new ArgumentOutOfRangeException(nameof(mode)) };
     private static string ToOverlapCode(PolicyOverlapBehavior behavior) => behavior switch { PolicyOverlapBehavior.Block => "BLOCK", PolicyOverlapBehavior.Warn => "WARN", PolicyOverlapBehavior.Allow => "ALLOW", _ => throw new ArgumentOutOfRangeException(nameof(behavior)) };
     private DateTime UtcNow() => timeProvider.GetUtcNow().UtcDateTime;
+
+    private Task WritePolicyAuditAsync(string action, LeavePolicy policy, CancellationToken cancellationToken) =>
+        auditWriter is null
+            ? Task.CompletedTask
+            : auditWriter.WriteAsync(new AuditEventData(
+                currentActor?.UserId,
+                action,
+                "LeavePolicy",
+                policy.Id,
+                null,
+                policy.OrgUnitId,
+                null,
+                UtcNow(),
+                AuditMetadataJson.Serialize(new
+                {
+                    leaveTypeId = policy.LeaveTypeId,
+                    policy.IsActive,
+                    policy.AppliesToDescendants
+                })), cancellationToken);
+
+    private Task WriteVersionAuditAsync(string action, LeavePolicy policy, LeavePolicyVersion version, CancellationToken cancellationToken) =>
+        auditWriter is null
+            ? Task.CompletedTask
+            : auditWriter.WriteAsync(new AuditEventData(
+                currentActor?.UserId,
+                action,
+                "LeavePolicyVersion",
+                version.Id,
+                null,
+                policy.OrgUnitId,
+                null,
+                UtcNow(),
+                AuditMetadataJson.Serialize(new
+                {
+                    leavePolicyId = version.LeavePolicyId,
+                    versionNumber = version.VersionNumber,
+                    effectiveFrom = version.EffectiveFrom,
+                    effectiveTo = version.EffectiveTo,
+                    dayCountMode = ToDayCountCode(version.DayCountMode),
+                    balanceBucketId = version.BalanceBucketId,
+                    leaveTypeId = policy.LeaveTypeId,
+                    status = ToStatusCode(version.Status)
+                })), cancellationToken);
 }
 
