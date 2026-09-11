@@ -55,3 +55,13 @@ Use idempotency keys or command IDs for operations vulnerable to retry duplicati
 - [Authorization](authorization.md)
 - [Database](database.md)
 - [Workflows](../product/workflows.md)
+
+## Implemented EP-08 approval endpoints
+
+EP-08 adds explicit leave-request decision endpoints:
+
+- `GET /api/leave-requests/pending-approval`
+- `POST /api/leave-requests/{id}/approve`
+- `POST /api/leave-requests/{id}/reject`
+
+Approve/reject payloads accept only `operationId` and decision `comment`. They do not accept arbitrary status, employee id, calculated days, policy version, balance account, reservation id, or settlement id. There is no generic status endpoint.

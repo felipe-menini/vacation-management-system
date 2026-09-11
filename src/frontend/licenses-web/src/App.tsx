@@ -17,7 +17,8 @@ type WorkingCalendar = { id: string; code: string; name: string; description: st
 type DayCalculationResult = { startDate: string; endDate: string; dayCountMode: string; workingCalendarId: string | null; calculatedDays: number; details: { date: string; isCounted: boolean }[] };
 type BalanceSnapshot = { userId: string; balanceBucketId: string; balanceBucketCode: string; balanceBucketName: string; unit: string; available: number; reserved: number };
 type BalanceLedgerEntry = { id: string; operationId: string; type: string; availableDelta: number; reservedDelta: number; reason: string; createdByUserId: string | null; createdByUserName: string | null; createdAtUtc: string };
-type LeaveRequest = { id: string; userId: string; userDisplayName: string | null; orgUnitId: string; orgUnitCode: string | null; orgUnitName: string | null; leaveTypeId: string; leaveTypeCode: string | null; leaveTypeName: string | null; leavePolicyVersionId: string | null; startDate: string; endDate: string; dayPortion: string; calculatedDays: number | null; status: string; comment: string | null; createdAtUtc: string; submittedAtUtc: string | null };
+type LeaveRequestDecision = { id: string; leaveRequestId: string; decision: string; decidedByUserId: string; decidedByUserDisplayName: string | null; comment: string | null; operationId: string; balanceSettlementOperationId: string | null; createdAtUtc: string };
+type LeaveRequest = { id: string; userId: string; userDisplayName: string | null; orgUnitId: string; orgUnitCode: string | null; orgUnitName: string | null; leaveTypeId: string; leaveTypeCode: string | null; leaveTypeName: string | null; leavePolicyVersionId: string | null; startDate: string; endDate: string; dayPortion: string; calculatedDays: number | null; status: string; comment: string | null; createdAtUtc: string; submittedAtUtc: string | null; decidedAtUtc: string | null; decision: LeaveRequestDecision | null };
 type SubmitLeaveRequestResult = { request: LeaveRequest; warnings: string[]; wasAlreadySubmitted: boolean };
 
 type StatusCardProps = { label: string; status: HealthStatus };
@@ -131,6 +132,8 @@ export function App() {
   const [isBalanceSubmitting, setIsBalanceSubmitting] = useState(false);
   const [myRequests, setMyRequests] = useState<LeaveRequest[]>([]);
   const [scopedRequests, setScopedRequests] = useState<LeaveRequest[]>([]);
+  const [pendingApprovals, setPendingApprovals] = useState<LeaveRequest[]>([]);
+  const [processingDecisionId, setProcessingDecisionId] = useState<string | null>(null);
   const [requestMessage, setRequestMessage] = useState<string | null>(null);
   const [isRequestSubmitting, setIsRequestSubmitting] = useState(false);
 
@@ -166,6 +169,11 @@ export function App() {
       setScopedRequests(await fetchJson<LeaveRequest[]>('/leave-requests/scoped', actorId));
     } catch {
       setScopedRequests([]);
+    }
+    try {
+      setPendingApprovals(await fetchJson<LeaveRequest[]>('/leave-requests/pending-approval', actorId));
+    } catch {
+      setPendingApprovals([]);
     }
   }
 
@@ -296,6 +304,7 @@ export function App() {
           setBalanceMessage(error instanceof Error ? error.message : 'Unable to load balances.');
           setMyRequests([]);
           setScopedRequests([]);
+          setPendingApprovals([]);
         }
       }
     })();
@@ -580,6 +589,23 @@ export function App() {
     finally { setIsRequestSubmitting(false); }
   }
 
+  async function decideLeaveRequest(event: FormEvent<HTMLFormElement>, requestId: string, decision: 'approve' | 'reject') {
+    event.preventDefault();
+    const operationId = crypto.randomUUID();
+    const data = new FormData(event.currentTarget);
+    try {
+      setProcessingDecisionId(requestId);
+      await sendJson(`/leave-requests/${requestId}/${decision}`, 'POST', { operationId, comment: data.get('comment') || null }, selectedActorId);
+      await loadLeaveRequests(selectedActorId);
+      await loadMyBalances(selectedActorId);
+      setRequestMessage(`Request ${decision === 'approve' ? 'approved' : 'rejected'}.`);
+    } catch (error) {
+      setRequestMessage(error instanceof Error ? error.message : `Unable to ${decision} request.`);
+    } finally {
+      setProcessingDecisionId(null);
+    }
+  }
+
   return (
     <main className="page-shell">
       <section className="hero">
@@ -726,6 +752,7 @@ export function App() {
             <span>{request.orgUnitCode ?? request.orgUnitId} · {request.startDate} → {request.endDate} · {request.dayPortion}</span>
             <span>Calculated: {request.calculatedDays ?? 'pending'} · Policy version: {request.leavePolicyVersionId ?? 'not frozen'}</span>
             <span>{request.comment ?? 'No comment'}</span>
+            {request.decision ? <span>Decision: {request.decision.decision} by {request.decision.decidedByUserDisplayName ?? request.decision.decidedByUserId} on {new Date(request.decision.createdAtUtc).toLocaleString()}{request.decision.comment ? ` · ${request.decision.comment}` : ''}</span> : null}
             {request.status === 'DRAFT' ? <details><summary>Edit draft</summary><form className="catalog-form inline-form" onSubmit={(event) => updateLeaveRequest(event, request.id)}>
               <select name="leaveTypeId" required defaultValue={request.leaveTypeId}>{leaveTypes.map((type) => <option key={type.id} value={type.id}>{type.code}</option>)}</select>
               <select name="orgUnitId" required defaultValue={request.orgUnitId}>{flattenOrgUnits(orgTree).map((unit) => <option key={unit.id} value={unit.id}>{unit.code}</option>)}</select>
@@ -738,7 +765,25 @@ export function App() {
             {request.status === 'DRAFT' ? <button type="button" disabled={isRequestSubmitting} onClick={() => submitLeaveRequest(request.id)}>Submit</button> : null}
           </div>)}
         </div></article>
-        {scopedRequests.length > 0 ? <article className="panel-card"><h3>Scoped request inspector</h3><div className="catalog-list">{scopedRequests.map((request) => <div className="version-row" key={request.id}><span>{request.userDisplayName ?? request.userId}</span><span>{request.leaveTypeCode}</span><span>{request.orgUnitCode}</span><span>{request.startDate} → {request.endDate}</span><span>{request.status}</span></div>)}</div></article> : null}
+        <article className="panel-card"><h3>Pending approvals</h3>{pendingApprovals.length === 0 ? <p className="muted">No pending approvals visible for this actor.</p> : null}<div className="catalog-list">
+          {pendingApprovals.map((request) => <div className="version-row" key={request.id}>
+            <strong>{request.userDisplayName ?? request.userId} · {request.leaveTypeCode ?? request.leaveTypeName ?? request.leaveTypeId}</strong>
+            <span>{request.orgUnitCode ?? request.orgUnitName ?? request.orgUnitId} · {request.startDate} → {request.endDate} · {request.calculatedDays ?? 'pending'} days</span>
+            <span>Submitted: {request.submittedAtUtc ? new Date(request.submittedAtUtc).toLocaleString() : 'not submitted'}</span>
+            <span>{request.comment ?? 'No employee comment'}</span>
+            {request.userId !== selectedActorId ? <div className="decision-actions">
+              <form className="catalog-form inline-form" onSubmit={(event) => decideLeaveRequest(event, request.id, 'approve')}>
+                <input name="comment" placeholder="Optional approval comment" />
+                <button type="submit" disabled={processingDecisionId === request.id}>Approve</button>
+              </form>
+              <form className="catalog-form inline-form" onSubmit={(event) => decideLeaveRequest(event, request.id, 'reject')}>
+                <input name="comment" placeholder="Required rejection reason" required />
+                <button type="submit" disabled={processingDecisionId === request.id}>Reject</button>
+              </form>
+            </div> : <p className="muted">Own request: decision controls hidden.</p>}
+          </div>)}
+        </div></article>
+        {scopedRequests.length > 0 ? <article className="panel-card"><h3>Scoped request inspector</h3><div className="catalog-list">{scopedRequests.map((request) => <div className="version-row" key={request.id}><span>{request.userDisplayName ?? request.userId}</span><span>{request.leaveTypeCode}</span><span>{request.orgUnitCode}</span><span>{request.startDate} → {request.endDate}</span><span>{request.status}</span>{request.decision ? <span>{request.decision.decision} · {request.decision.comment ?? 'No decision comment'}</span> : null}</div>)}</div></article> : null}
       </section>
 
       <section className="admin-panel" aria-label="Balance ledger">

@@ -20,6 +20,7 @@ public static class PermissionCodes
     public const string LeaveRequestsReadSelf = "leave.requests.read.self";
     public const string LeaveRequestsCreateSelf = "leave.requests.create.self";
     public const string LeaveRequestsRead = "leave.requests.read";
+    public const string LeaveRequestsDecide = "leave.requests.decide";
 }
 
 public sealed record CurrentActor(Guid UserId);

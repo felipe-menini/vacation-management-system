@@ -4,7 +4,7 @@ Leave requests represent an employee request for a leave type over business date
 
 ## Lifecycle
 
-Known statuses are DRAFT, PENDING_APPROVAL, APPROVED, REJECTED, CANCELLATION_REQUESTED, CANCELLED, REVOKED, and COMPLETED. EP-07 implements only DRAFT -> PENDING_APPROVAL.
+Known statuses are DRAFT, PENDING_APPROVAL, APPROVED, REJECTED, CANCELLATION_REQUESTED, CANCELLED, REVOKED, and COMPLETED. EP-07 implements DRAFT -> PENDING_APPROVAL. EP-08 implements only the final approval decisions PENDING_APPROVAL -> APPROVED and PENDING_APPROVAL -> REJECTED.
 
 A DRAFT may be edited by its owner. Once submitted, core request fields, the frozen policy version, calculated days, and balance reservation linkage are not editable through the draft update API.
 
@@ -31,6 +31,16 @@ Policy OverlapBehavior controls submission: BLOCK rejects, WARN submits with a w
 Non-consuming policies create no account or ledger entry. Consuming policies reserve CalculatedDays through the EP-06 RESERVE ledger semantic using the policy BalanceBucketId. The request stores BalanceAccountId and BalanceReservationOperationId for future settlement.
 
 Submission is idempotent: once PENDING_APPROVAL, retry returns the submitted request and does not reserve again. Future APPROVE will convert the existing reservation using CONSUME. Future REJECT will release it using RELEASE.
+
+## Approval and rejection
+
+EP-08 uses a single final decision model. An authorized actor with `leave.requests.decide` and organizational scope over the request's stored `OrgUnitId` may approve or reject a submitted request. The actor may not decide their own request, even if they hold supervisor, manager, or HR permissions.
+
+Approval comments are optional. Rejection requires a non-empty reason. The employee's original request comment is not changed by approval or rejection.
+
+Approval/rejection is idempotent by command `OperationId`, concurrency-safe, and auditable through immutable decision history. `APPROVED` and `REJECTED` are final for this EP. Cancellation, revocation, completion, and multi-step approval are deferred.
+
+Approval never re-resolves policy, recalculates days, or selects a new balance bucket. The frozen request values from submission are authoritative.
 
 ## Authorization
 

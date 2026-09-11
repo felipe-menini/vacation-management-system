@@ -23,6 +23,13 @@ public static class LeaveRequestEndpoints
             return Results.Ok(await service.ListScopedAsync(cancellationToken));
         });
 
+        group.MapGet("/pending-approval", async (ICurrentActor actor, AuthorizationService authorization, LeaveRequestService service, CancellationToken cancellationToken) =>
+        {
+            if (actor.UserId is not { } actorId) return Results.Unauthorized();
+            if (!await authorization.CanUserPerformGlobalAsync(actorId, PermissionCodes.LeaveRequestsDecide, cancellationToken)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+            return Results.Ok(await service.GetPendingApprovalsAsync(cancellationToken));
+        });
+
         group.MapGet("/{id:guid}", async (Guid id, ICurrentActor actor, LeaveRequestService service, CancellationToken cancellationToken) =>
         {
             if (actor.UserId is null) return Results.Unauthorized();
@@ -49,6 +56,32 @@ public static class LeaveRequestEndpoints
             if (actor.UserId is not { } actorId) return Results.Unauthorized();
             if (!await authorization.CanUserPerformGlobalAsync(actorId, PermissionCodes.LeaveRequestsCreateSelf, cancellationToken)) return Results.StatusCode(StatusCodes.Status403Forbidden);
             return await service.SubmitAsync(id, cancellationToken) is { } result ? Results.Ok(result) : Results.NotFound();
+        });
+
+        group.MapPost("/{id:guid}/approve", async (Guid id, DecideLeaveRequestCommand command, ICurrentActor actor, AuthorizationService authorization, LeaveRequestService service, CancellationToken cancellationToken) =>
+        {
+            if (actor.UserId is not { } actorId) return Results.Unauthorized();
+            if (!await authorization.CanUserPerformGlobalAsync(actorId, PermissionCodes.LeaveRequestsDecide, cancellationToken)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+            try
+            {
+                return await service.ApproveAsync(id, command, cancellationToken) is { } result ? Results.Ok(result) : Results.NotFound();
+            }
+            catch (UnauthorizedAccessException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status403Forbidden); }
+            catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+            catch (InvalidOperationException ex) { return Results.Conflict(new { error = ex.Message }); }
+        });
+
+        group.MapPost("/{id:guid}/reject", async (Guid id, DecideLeaveRequestCommand command, ICurrentActor actor, AuthorizationService authorization, LeaveRequestService service, CancellationToken cancellationToken) =>
+        {
+            if (actor.UserId is not { } actorId) return Results.Unauthorized();
+            if (!await authorization.CanUserPerformGlobalAsync(actorId, PermissionCodes.LeaveRequestsDecide, cancellationToken)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+            try
+            {
+                return await service.RejectAsync(id, command, cancellationToken) is { } result ? Results.Ok(result) : Results.NotFound();
+            }
+            catch (UnauthorizedAccessException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status403Forbidden); }
+            catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+            catch (InvalidOperationException ex) { return Results.Conflict(new { error = ex.Message }); }
         });
 
         app.MapGet("/api/users/{userId:guid}/leave-requests", async (Guid userId, ICurrentActor actor, LeaveRequestService service, CancellationToken cancellationToken) =>

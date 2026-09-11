@@ -25,6 +25,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<BalanceAccount> BalanceAccounts => Set<BalanceAccount>();
     public DbSet<BalanceLedgerEntry> BalanceLedgerEntries => Set<BalanceLedgerEntry>();
     public DbSet<LeaveRequest> LeaveRequests => Set<LeaveRequest>();
+    public DbSet<LeaveRequestDecision> LeaveRequestDecisions => Set<LeaveRequestDecision>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

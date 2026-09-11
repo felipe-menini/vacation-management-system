@@ -23,6 +23,12 @@ public sealed class EfLeaveRequestRepository(ApplicationDbContext dbContext) : I
     public Task<IReadOnlyList<LeaveRequest>> ListByUsersAsync(IReadOnlyCollection<Guid> userIds, CancellationToken cancellationToken) =>
         dbContext.LeaveRequests.AsNoTracking().Where(x => userIds.Contains(x.UserId)).OrderByDescending(x => x.CreatedAtUtc).ToListAsync(cancellationToken).ContinueWith(t => (IReadOnlyList<LeaveRequest>)t.Result, cancellationToken);
 
+    public Task<IReadOnlyList<LeaveRequest>> ListPendingByOrgUnitsAsync(IReadOnlyCollection<Guid> orgUnitIds, CancellationToken cancellationToken) =>
+        dbContext.LeaveRequests.AsNoTracking()
+            .Where(x => orgUnitIds.Contains(x.OrgUnitId) && x.Status == LeaveRequestStatus.PendingApproval)
+            .OrderBy(x => x.SubmittedAtUtc)
+            .ToListAsync(cancellationToken).ContinueWith(t => (IReadOnlyList<LeaveRequest>)t.Result, cancellationToken);
+
     public Task<LeaveRequest?> GetAsync(Guid id, bool tracking, CancellationToken cancellationToken)
     {
         var query = tracking ? dbContext.LeaveRequests : dbContext.LeaveRequests.AsNoTracking();
@@ -35,7 +41,19 @@ public sealed class EfLeaveRequestRepository(ApplicationDbContext dbContext) : I
         return await dbContext.LeaveRequests.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
     }
 
+    public Task<LeaveRequestDecision?> GetDecisionByOperationIdAsync(Guid operationId, CancellationToken cancellationToken) =>
+        dbContext.LeaveRequestDecisions.AsNoTracking().FirstOrDefaultAsync(x => x.OperationId == operationId, cancellationToken);
+
+    public Task<LeaveRequestDecision?> GetDecisionByRequestIdAsync(Guid requestId, CancellationToken cancellationToken) =>
+        dbContext.LeaveRequestDecisions.AsNoTracking().FirstOrDefaultAsync(x => x.LeaveRequestId == requestId, cancellationToken);
+
+    public Task<IReadOnlyList<LeaveRequestDecision>> ListDecisionsByRequestIdsAsync(IReadOnlyCollection<Guid> requestIds, CancellationToken cancellationToken) =>
+        dbContext.LeaveRequestDecisions.AsNoTracking()
+            .Where(x => requestIds.Contains(x.LeaveRequestId))
+            .ToListAsync(cancellationToken).ContinueWith(t => (IReadOnlyList<LeaveRequestDecision>)t.Result, cancellationToken);
+
     public Task AddAsync(LeaveRequest request, CancellationToken cancellationToken) => dbContext.LeaveRequests.AddAsync(request, cancellationToken).AsTask();
+    public Task AddDecisionAsync(LeaveRequestDecision decision, CancellationToken cancellationToken) => dbContext.LeaveRequestDecisions.AddAsync(decision, cancellationToken).AsTask();
     public Task<User?> GetUserAsync(Guid id, CancellationToken cancellationToken) => dbContext.Users.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
     public Task<OrgUnit?> GetOrgUnitAsync(Guid id, CancellationToken cancellationToken) => dbContext.OrgUnits.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
     public Task<LeaveType?> GetLeaveTypeAsync(Guid id, CancellationToken cancellationToken) => dbContext.LeaveTypes.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);

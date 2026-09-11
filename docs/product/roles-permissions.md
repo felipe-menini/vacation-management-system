@@ -99,3 +99,15 @@ EP-07 adds:
 | `leave.requests.read` | Read leave requests inside authorized organizational scope. |
 
 Development seed grants self permissions to Employee, Supervisor, Manager, and HR. Supervisor, Manager, and HR receive scoped read. Technical Administrator receives no automatic business request permission.
+
+## Implemented approval permission
+
+EP-08 adds:
+
+| Permission | Description |
+| --- | --- |
+| `leave.requests.decide` | Approve or reject submitted leave requests inside authorized organizational scope. |
+
+Development seed grants `leave.requests.decide` to Supervisor, Manager, and HR. Employee does not receive it. Technical Administrator still receives no automatic business decision permission.
+
+Self-approval and self-rejection are prohibited even when the actor has this permission. Scope is evaluated against the request's stored `OrgUnitId`.
