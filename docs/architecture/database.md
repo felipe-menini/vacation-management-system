@@ -63,3 +63,7 @@ Persistence guarantees include unique normalized calendar codes, one weekday row
 EP-06 adds `licenses.balance_accounts` and `licenses.balance_ledger_entries`. `balance_accounts` enforces one account per `(user_id, balance_bucket_id)`. `balance_ledger_entries` enforces unique `operation_id`, controlled entry types, semantic delta checks, and a PostgreSQL trigger that rejects direct `UPDATE` and `DELETE`.
 
 Balance mutation transactions cover account acquisition/creation, idempotency check, row-level account locking, balance derivation, invariant validation, and ledger insertion. There are no mutable current-balance columns.
+
+## Implemented leave request persistence
+
+EP-07 adds `licenses.leave_requests`. Business dates use PostgreSQL `date`; lifecycle timestamps use UTC. Constraints enforce controlled status/day portion values, `end_date >= start_date`, single-date half days, positive calculated days, draft/submitted consistency, and balance-link consistency. Foreign keys use conservative delete behavior to preserve request history.

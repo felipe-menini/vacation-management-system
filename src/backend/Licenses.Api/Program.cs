@@ -32,6 +32,7 @@ builder.Services.AddScoped<LeaveCatalogService>();
 builder.Services.AddScoped<LeavePolicyService>();
 builder.Services.AddScoped<WorkingCalendarService>();
 builder.Services.AddScoped<BalanceService>();
+builder.Services.AddScoped<LeaveRequestService>();
 
 var app = builder.Build();
 
@@ -62,9 +63,8 @@ app.MapLeaveCatalogEndpoints();
 app.MapLeavePolicyEndpoints();
 app.MapWorkingCalendarEndpoints();
 app.MapBalanceEndpoints();
+app.MapLeaveRequestEndpoints();
 
 app.Run();
 
 public partial class Program;
-
-

@@ -45,10 +45,10 @@ public static class DevelopmentOrganizationSeeder
         var hrRole = await EnsureRoleAsync(db, "HR", "HR", "Organization-wide HR administration.", now, cancellationToken);
         var techAdmin = await EnsureRoleAsync(db, "TECH_ADMIN", "Technical Administrator", "Technical platform administration without default HR authority.", now, cancellationToken);
 
-        await EnsureRolePermissionsAsync(db, employee, [PermissionCodes.LeaveCatalogRead, PermissionCodes.LeavePoliciesRead, PermissionCodes.LeaveCalendarsRead, PermissionCodes.LeaveBalancesReadSelf], permissions, cancellationToken);
-        await EnsureRolePermissionsAsync(db, supervisor, [PermissionCodes.OrgUnitsRead, PermissionCodes.OrgUsersRead, PermissionCodes.OrgAssignmentsRead, PermissionCodes.LeaveCatalogRead, PermissionCodes.LeavePoliciesRead, PermissionCodes.LeaveCalendarsRead, PermissionCodes.LeaveBalancesReadSelf, PermissionCodes.LeaveBalancesRead], permissions, cancellationToken);
-        await EnsureRolePermissionsAsync(db, manager, [PermissionCodes.OrgUnitsRead, PermissionCodes.OrgUnitsManage, PermissionCodes.OrgUsersRead, PermissionCodes.OrgUsersManage, PermissionCodes.OrgAssignmentsRead, PermissionCodes.OrgAssignmentsManage, PermissionCodes.LeaveCatalogRead, PermissionCodes.LeavePoliciesRead, PermissionCodes.LeaveCalendarsRead, PermissionCodes.LeaveBalancesReadSelf, PermissionCodes.LeaveBalancesRead], permissions, cancellationToken);
-        await EnsureRolePermissionsAsync(db, hrRole, [PermissionCodes.OrgUnitsRead, PermissionCodes.OrgUnitsManage, PermissionCodes.OrgUsersRead, PermissionCodes.OrgUsersManage, PermissionCodes.OrgAssignmentsRead, PermissionCodes.OrgAssignmentsManage, PermissionCodes.LeaveCatalogRead, PermissionCodes.LeaveCatalogManage, PermissionCodes.LeavePoliciesRead, PermissionCodes.LeavePoliciesManage, PermissionCodes.LeaveCalendarsRead, PermissionCodes.LeaveCalendarsManage, PermissionCodes.LeaveBalancesReadSelf, PermissionCodes.LeaveBalancesRead, PermissionCodes.LeaveBalancesManage], permissions, cancellationToken);
+        await EnsureRolePermissionsAsync(db, employee, [PermissionCodes.LeaveCatalogRead, PermissionCodes.LeavePoliciesRead, PermissionCodes.LeaveCalendarsRead, PermissionCodes.LeaveBalancesReadSelf, PermissionCodes.LeaveRequestsReadSelf, PermissionCodes.LeaveRequestsCreateSelf], permissions, cancellationToken);
+        await EnsureRolePermissionsAsync(db, supervisor, [PermissionCodes.OrgUnitsRead, PermissionCodes.OrgUsersRead, PermissionCodes.OrgAssignmentsRead, PermissionCodes.LeaveCatalogRead, PermissionCodes.LeavePoliciesRead, PermissionCodes.LeaveCalendarsRead, PermissionCodes.LeaveBalancesReadSelf, PermissionCodes.LeaveBalancesRead, PermissionCodes.LeaveRequestsReadSelf, PermissionCodes.LeaveRequestsCreateSelf, PermissionCodes.LeaveRequestsRead], permissions, cancellationToken);
+        await EnsureRolePermissionsAsync(db, manager, [PermissionCodes.OrgUnitsRead, PermissionCodes.OrgUnitsManage, PermissionCodes.OrgUsersRead, PermissionCodes.OrgUsersManage, PermissionCodes.OrgAssignmentsRead, PermissionCodes.OrgAssignmentsManage, PermissionCodes.LeaveCatalogRead, PermissionCodes.LeavePoliciesRead, PermissionCodes.LeaveCalendarsRead, PermissionCodes.LeaveBalancesReadSelf, PermissionCodes.LeaveBalancesRead, PermissionCodes.LeaveRequestsReadSelf, PermissionCodes.LeaveRequestsCreateSelf, PermissionCodes.LeaveRequestsRead], permissions, cancellationToken);
+        await EnsureRolePermissionsAsync(db, hrRole, [PermissionCodes.OrgUnitsRead, PermissionCodes.OrgUnitsManage, PermissionCodes.OrgUsersRead, PermissionCodes.OrgUsersManage, PermissionCodes.OrgAssignmentsRead, PermissionCodes.OrgAssignmentsManage, PermissionCodes.LeaveCatalogRead, PermissionCodes.LeaveCatalogManage, PermissionCodes.LeavePoliciesRead, PermissionCodes.LeavePoliciesManage, PermissionCodes.LeaveCalendarsRead, PermissionCodes.LeaveCalendarsManage, PermissionCodes.LeaveBalancesReadSelf, PermissionCodes.LeaveBalancesRead, PermissionCodes.LeaveBalancesManage, PermissionCodes.LeaveRequestsReadSelf, PermissionCodes.LeaveRequestsCreateSelf, PermissionCodes.LeaveRequestsRead], permissions, cancellationToken);
         await EnsureRolePermissionsAsync(db, techAdmin, [PermissionCodes.OrgUnitsRead], permissions, cancellationToken);
 
         await EnsureRoleScopeAssignmentAsync(db, felipe.Id, manager.Id, it.Id, includeDescendants: true, now, cancellationToken);
@@ -115,7 +115,10 @@ public static class DevelopmentOrganizationSeeder
             [PermissionCodes.LeaveCalendarsManage] = "Create and update working calendar configuration.",
             [PermissionCodes.LeaveBalancesReadSelf] = "Read own leave balances.",
             [PermissionCodes.LeaveBalancesRead] = "Read balances inside authorized organizational scope.",
-            [PermissionCodes.LeaveBalancesManage] = "Manage balances inside authorized organizational scope."
+            [PermissionCodes.LeaveBalancesManage] = "Manage balances inside authorized organizational scope.",
+            [PermissionCodes.LeaveRequestsReadSelf] = "Read own leave requests.",
+            [PermissionCodes.LeaveRequestsCreateSelf] = "Create and submit own leave requests.",
+            [PermissionCodes.LeaveRequestsRead] = "Read leave requests inside authorized organizational scope."
         };
         foreach (var item in catalog)
         {
@@ -330,7 +333,3 @@ public static class DevelopmentOrganizationSeeder
         await db.SaveChangesAsync(cancellationToken);
     }
 }
-
-
-
-

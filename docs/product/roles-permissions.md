@@ -87,3 +87,15 @@ EP-06 adds:
 | `leave.balances.manage` | Grant, adjust, and expire balances within organizational scope. |
 
 Development seed grants self-read to Employee, Supervisor, Manager, and HR. Supervisor and Manager receive scoped balance read. HR receives scoped balance read and manage. Technical Administrator receives no automatic business balance permission.
+
+## Implemented leave request permissions
+
+EP-07 adds:
+
+| Permission | Description |
+| --- | --- |
+| `leave.requests.read.self` | Read own leave requests. |
+| `leave.requests.create.self` | Create, edit draft, and submit own leave requests. |
+| `leave.requests.read` | Read leave requests inside authorized organizational scope. |
+
+Development seed grants self permissions to Employee, Supervisor, Manager, and HR. Supervisor, Manager, and HR receive scoped read. Technical Administrator receives no automatic business request permission.
