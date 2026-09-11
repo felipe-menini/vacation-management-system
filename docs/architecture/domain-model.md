@@ -89,3 +89,9 @@ A balance account has no mutable balance field. Available and reserved balances 
 ## Implemented leave request model
 
 EP-07 implements `LeaveRequest` as the aggregate for employee-owned drafts and submissions. The request stores `OrgUnitId` explicitly so historical scope is not re-derived from later assignment changes. Drafts keep `LeavePolicyVersionId`, `CalculatedDays`, and balance linkage empty. Submission freezes the exact published `LeavePolicyVersion` resolved by `StartDate`, stores calculated quantity, and moves only `DRAFT -> PENDING_APPROVAL`.
+
+## Implemented approval decision model
+
+EP-08 adds `LeaveRequestDecision` as immutable business history for one final decision per request. The implemented state machine is intentionally narrow: `PENDING_APPROVAL -> APPROVED` and `PENDING_APPROVAL -> REJECTED`.
+
+Approval and rejection use explicit domain operations, not a generic status setter. Self-approval is prohibited. Decision scope is evaluated against the request's stored `OrgUnitId`. Multi-step workflows, routing tables, delegation, and quorum rules are intentionally deferred.

@@ -67,3 +67,9 @@ Balance mutation transactions cover account acquisition/creation, idempotency ch
 ## Implemented leave request persistence
 
 EP-07 adds `licenses.leave_requests`. Business dates use PostgreSQL `date`; lifecycle timestamps use UTC. Constraints enforce controlled status/day portion values, `end_date >= start_date`, single-date half days, positive calculated days, draft/submitted consistency, and balance-link consistency. Foreign keys use conservative delete behavior to preserve request history.
+
+## Implemented approval persistence
+
+EP-08 adds `licenses.leave_request_decisions` and `leave_requests.decided_at_utc`. Decision rows are append-only business history with one final decision per request, unique command `operation_id`, controlled `APPROVE` / `REJECT` values, required rejection comments, conservative foreign keys, and an immutability trigger rejecting direct `UPDATE`/`DELETE`.
+
+Approval/rejection runs in one PostgreSQL transaction with a row-level lock on `leave_requests`, decision insertion, final status update, and optional balance settlement ledger entry.

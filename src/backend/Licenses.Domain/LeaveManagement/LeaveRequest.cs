@@ -38,6 +38,7 @@ public sealed class LeaveRequest
     public DateTime CreatedAtUtc { get; private set; }
     public DateTime UpdatedAtUtc { get; private set; }
     public DateTime? SubmittedAtUtc { get; private set; }
+    public DateTime? DecidedAtUtc { get; private set; }
 
     public static LeaveRequest CreateDraft(Guid userId, Guid orgUnitId, Guid leaveTypeId, DateOnly startDate, DateOnly endDate, LeaveRequestDayPortion dayPortion, string? comment, Guid createdByUserId, DateTime createdAtUtc) =>
         new(Guid.NewGuid(), userId, orgUnitId, leaveTypeId, startDate, endDate, dayPortion, comment, createdByUserId, createdAtUtc);
@@ -71,6 +72,22 @@ public sealed class LeaveRequest
         Status = LeaveRequestStatus.PendingApproval;
     }
 
+    public void Approve(DateTime decidedAtUtc)
+    {
+        EnsurePendingApproval();
+        DecidedAtUtc = EnsureUtc(decidedAtUtc, nameof(decidedAtUtc));
+        UpdatedAtUtc = DecidedAtUtc.Value;
+        Status = LeaveRequestStatus.Approved;
+    }
+
+    public void Reject(DateTime decidedAtUtc)
+    {
+        EnsurePendingApproval();
+        DecidedAtUtc = EnsureUtc(decidedAtUtc, nameof(decidedAtUtc));
+        UpdatedAtUtc = DecidedAtUtc.Value;
+        Status = LeaveRequestStatus.Rejected;
+    }
+
     public static bool IsActiveOverlapStatus(LeaveRequestStatus status) => status is LeaveRequestStatus.PendingApproval or LeaveRequestStatus.Approved or LeaveRequestStatus.CancellationRequested;
 
     private void ApplyDraftFields(Guid orgUnitId, Guid leaveTypeId, DateOnly startDate, DateOnly endDate, LeaveRequestDayPortion dayPortion, string? comment)
@@ -91,6 +108,11 @@ public sealed class LeaveRequest
     private void EnsureDraft()
     {
         if (Status != LeaveRequestStatus.Draft) throw new InvalidOperationException("Only DRAFT leave requests can be edited or submitted by this operation.");
+    }
+
+    private void EnsurePendingApproval()
+    {
+        if (Status != LeaveRequestStatus.PendingApproval) throw new InvalidOperationException("Only PENDING_APPROVAL leave requests can be decided.");
     }
 
     private static string? NormalizeOptional(string? value, int maxLength, string name)

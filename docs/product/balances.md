@@ -44,3 +44,13 @@ Inactive buckets do not invalidate history. New grants/reserves require active b
 ## Implemented EP-07 request reservation
 
 Submitted consuming leave requests reserve the frozen calculated quantity through the existing `RESERVE` ledger operation. The request stores the reservation operation id so retries and future approval/rejection settlement use the same accounting link. Future APPROVE will use `CONSUME`; future REJECT will use `RELEASE`.
+
+## Implemented EP-08 approval settlement
+
+Approval/rejection settles the EP-07 reservation using the frozen request data:
+
+- `APPROVE` on a consuming request creates one idempotent `CONSUME CalculatedDays` settlement: available stays unchanged and reserved decreases.
+- `REJECT` on a consuming request creates one idempotent `RELEASE CalculatedDays` settlement: available increases and reserved decreases.
+- Non-consuming requests create no balance ledger settlement.
+
+Approval does not create a second `RESERVE`, does not grant or adjust balance, and does not recalculate the quantity from current policy/calendar configuration.

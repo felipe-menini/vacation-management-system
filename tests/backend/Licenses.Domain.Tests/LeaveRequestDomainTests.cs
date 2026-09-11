@@ -57,6 +57,47 @@ public sealed class LeaveRequestDomainTests
         Assert.Equal(first, second);
     }
 
+    [Fact]
+    public void PendingApprovalCanApproveOrRejectOnlyOnce()
+    {
+        var approved = Submitted();
+        approved.Approve(DateTime.UtcNow);
+        Assert.Equal(LeaveRequestStatus.Approved, approved.Status);
+        Assert.Throws<InvalidOperationException>(() => approved.Reject(DateTime.UtcNow));
+
+        var rejected = Submitted();
+        rejected.Reject(DateTime.UtcNow);
+        Assert.Equal(LeaveRequestStatus.Rejected, rejected.Status);
+        Assert.Throws<InvalidOperationException>(() => rejected.Approve(DateTime.UtcNow));
+    }
+
+    [Fact]
+    public void DraftCannotBeApprovedOrRejected()
+    {
+        var request = Draft();
+        Assert.Throws<InvalidOperationException>(() => request.Approve(DateTime.UtcNow));
+        Assert.Throws<InvalidOperationException>(() => request.Reject(DateTime.UtcNow));
+    }
+
+    [Fact]
+    public void DecisionRequiresRejectionReasonAndKeepsRequestCommentUnchanged()
+    {
+        var request = Submitted(comment: "Employee comment");
+        var decision = LeaveRequestDecision.Create(request.Id, LeaveRequestDecisionKind.Reject, Guid.NewGuid(), "  Not eligible  ", Guid.NewGuid(), Guid.NewGuid(), DateTime.UtcNow);
+        request.Reject(decision.CreatedAtUtc);
+
+        Assert.Equal("Employee comment", request.Comment);
+        Assert.Equal("Not eligible", decision.Comment);
+        Assert.Throws<ArgumentException>(() => LeaveRequestDecision.Create(request.Id, LeaveRequestDecisionKind.Reject, Guid.NewGuid(), " ", Guid.NewGuid(), null, DateTime.UtcNow));
+    }
+
     private static LeaveRequest Draft(DateOnly? start = null, DateOnly? end = null, LeaveRequestDayPortion portion = LeaveRequestDayPortion.FullDay) =>
         LeaveRequest.CreateDraft(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), start ?? new DateOnly(2026, 9, 1), end ?? new DateOnly(2026, 9, 1), portion, null, Guid.NewGuid(), DateTime.UtcNow);
+
+    private static LeaveRequest Submitted(string? comment = null)
+    {
+        var request = LeaveRequest.CreateDraft(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 1), LeaveRequestDayPortion.FullDay, comment, Guid.NewGuid(), DateTime.UtcNow);
+        request.Submit(Guid.NewGuid(), 1m, null, null, DateTime.UtcNow);
+        return request;
+    }
 }

@@ -27,6 +27,7 @@ public sealed class LeaveRequestConfiguration : IEntityTypeConfiguration<LeaveRe
         builder.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc").IsRequired();
         builder.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc").IsRequired();
         builder.Property(x => x.SubmittedAtUtc).HasColumnName("submitted_at_utc");
+        builder.Property(x => x.DecidedAtUtc).HasColumnName("decided_at_utc");
         builder.HasOne<Licenses.Domain.Identity.User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<Licenses.Domain.Identity.User>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<Licenses.Domain.Organization.OrgUnit>().WithMany().HasForeignKey(x => x.OrgUnitId).OnDelete(DeleteBehavior.Restrict);
@@ -54,5 +55,35 @@ public sealed class LeaveRequestConfiguration : IEntityTypeConfiguration<LeaveRe
     public static LeaveRequestDayPortion FromDayPortion(string value) => value switch { "FULL_DAY" => LeaveRequestDayPortion.FullDay, "HALF_DAY" => LeaveRequestDayPortion.HalfDay, _ => throw new ArgumentOutOfRangeException(nameof(value)) };
     public static string ToStatus(LeaveRequestStatus value) => value switch { LeaveRequestStatus.Draft => "DRAFT", LeaveRequestStatus.PendingApproval => "PENDING_APPROVAL", LeaveRequestStatus.Approved => "APPROVED", LeaveRequestStatus.Rejected => "REJECTED", LeaveRequestStatus.CancellationRequested => "CANCELLATION_REQUESTED", LeaveRequestStatus.Cancelled => "CANCELLED", LeaveRequestStatus.Revoked => "REVOKED", LeaveRequestStatus.Completed => "COMPLETED", _ => throw new ArgumentOutOfRangeException(nameof(value)) };
     public static LeaveRequestStatus FromStatus(string value) => value switch { "DRAFT" => LeaveRequestStatus.Draft, "PENDING_APPROVAL" => LeaveRequestStatus.PendingApproval, "APPROVED" => LeaveRequestStatus.Approved, "REJECTED" => LeaveRequestStatus.Rejected, "CANCELLATION_REQUESTED" => LeaveRequestStatus.CancellationRequested, "CANCELLED" => LeaveRequestStatus.Cancelled, "REVOKED" => LeaveRequestStatus.Revoked, "COMPLETED" => LeaveRequestStatus.Completed, _ => throw new ArgumentOutOfRangeException(nameof(value)) };
+}
+
+public sealed class LeaveRequestDecisionConfiguration : IEntityTypeConfiguration<LeaveRequestDecision>
+{
+    public void Configure(EntityTypeBuilder<LeaveRequestDecision> builder)
+    {
+        builder.ToTable("leave_request_decisions");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Id).HasColumnName("id");
+        builder.Property(x => x.LeaveRequestId).HasColumnName("leave_request_id").IsRequired();
+        builder.Property(x => x.Decision).HasColumnName("decision").HasMaxLength(16).HasConversion(x => ToDecision(x), x => FromDecision(x)).IsRequired();
+        builder.Property(x => x.DecidedByUserId).HasColumnName("decided_by_user_id").IsRequired();
+        builder.Property(x => x.Comment).HasColumnName("comment").HasMaxLength(LeaveRequestDecision.CommentMaxLength);
+        builder.Property(x => x.OperationId).HasColumnName("operation_id").IsRequired();
+        builder.Property(x => x.BalanceSettlementOperationId).HasColumnName("balance_settlement_operation_id");
+        builder.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc").IsRequired();
+        builder.HasOne<LeaveRequest>().WithMany().HasForeignKey(x => x.LeaveRequestId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<Licenses.Domain.Identity.User>().WithMany().HasForeignKey(x => x.DecidedByUserId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasIndex(x => x.LeaveRequestId).IsUnique();
+        builder.HasIndex(x => x.OperationId).IsUnique();
+        builder.HasIndex(x => x.BalanceSettlementOperationId).IsUnique().HasFilter("balance_settlement_operation_id IS NOT NULL");
+        builder.ToTable(t =>
+        {
+            t.HasCheckConstraint("ck_leave_request_decisions_decision", "decision IN ('APPROVE','REJECT')");
+            t.HasCheckConstraint("ck_leave_request_decisions_reject_comment", "decision <> 'REJECT' OR (comment IS NOT NULL AND length(btrim(comment)) > 0)");
+        });
+    }
+
+    public static string ToDecision(LeaveRequestDecisionKind value) => value switch { LeaveRequestDecisionKind.Approve => "APPROVE", LeaveRequestDecisionKind.Reject => "REJECT", _ => throw new ArgumentOutOfRangeException(nameof(value)) };
+    public static LeaveRequestDecisionKind FromDecision(string value) => value switch { "APPROVE" => LeaveRequestDecisionKind.Approve, "REJECT" => LeaveRequestDecisionKind.Reject, _ => throw new ArgumentOutOfRangeException(nameof(value)) };
 }
 

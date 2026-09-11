@@ -34,7 +34,7 @@ stateDiagram-v2
 | `REVOKED` | Administrative revocation by authorized actor; reason required. |
 | `COMPLETED` | Leave period ended; optional operational terminal state. |
 
-## Approval flow
+## Target approval flow
 
 1. Employee completes a request and the frontend asks the backend for prevalidation.
 2. Backend resolves effective policy, calendar, balance, overlap, and capacity conflicts.
@@ -43,6 +43,8 @@ stateDiagram-v2
 5. Each decision is stored immutably with actor, timestamp, comment, and context.
 6. When all steps complete, reservation becomes consumption. On rejection, reservation is released.
 7. A domain/outbox event is recorded so notification failure does not roll back the business transaction.
+
+This describes the broader target workflow. EP-08 implements only one final approval decision and does not create routing, multi-step approval, or notification/outbox behavior.
 
 ## Cancellation flow
 
@@ -58,3 +60,16 @@ Revocation is administrative and distinct from employee-requested cancellation. 
 - [Leave policies](leave-policies.md)
 - [API](../architecture/api.md)
 - [Database](../architecture/database.md)
+
+## Implemented EP-08 leave request approval
+
+EP-08 supports the first approval workflow after submission:
+
+```text
+DRAFT -> PENDING_APPROVAL -> APPROVED
+                         \-> REJECTED
+```
+
+There is one final approval decision. Multi-step approval, configurable routing, cancellation, revocation, completion, notifications, and attachments are intentionally deferred.
+
+Approval consumes the existing reservation. Rejection releases it. Both use the frozen submitted request values and store immutable decision history.
