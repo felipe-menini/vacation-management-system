@@ -49,12 +49,32 @@ public sealed class AuthorizationService(IAuthorizationRepository repository, Ti
     }
 
 
-    public async Task<bool> CanUserReadGlobalScopedResourceAsync(Guid actorUserId, string permissionCode, CancellationToken cancellationToken)
+    public async Task<bool> CanUserPerformAtRootAsync(Guid actorUserId, string permissionCode, CancellationToken cancellationToken)
     {
         var allowedOrgUnits = await GetAuthorizedOrgUnitIdsAsync(actorUserId, permissionCode, cancellationToken);
         if (allowedOrgUnits.Count == 0) return false;
         var rootOrgUnits = (await repository.ListOrgUnitsAsync(cancellationToken)).Where(x => x.IsActive && x.ParentId is null).Select(x => x.Id).ToHashSet();
         return rootOrgUnits.Any(allowedOrgUnits.Contains);
+    }
+
+    public async Task<bool> CanUserAdministerScopeAsync(Guid actorUserId, string permissionCode, Guid targetOrgUnitId, bool includeDescendants, CancellationToken cancellationToken)
+    {
+        var allowedOrgUnits = await GetAuthorizedOrgUnitIdsAsync(actorUserId, permissionCode, cancellationToken);
+        if (!allowedOrgUnits.Contains(targetOrgUnitId)) return false;
+        if (!includeDescendants) return true;
+
+        var units = await repository.ListOrgUnitsAsync(cancellationToken);
+        var activeUnitIds = units.Where(x => x.IsActive).Select(x => x.Id).ToHashSet();
+        var childrenByParent = units.Where(x => x.ParentId is not null).GroupBy(x => x.ParentId!.Value).ToDictionary(x => x.Key, x => x.Select(y => y.Id).ToList());
+        var requestedScope = new HashSet<Guid> { targetOrgUnitId };
+        AddDescendants(targetOrgUnitId, childrenByParent, activeUnitIds, requestedScope);
+        return requestedScope.All(allowedOrgUnits.Contains);
+    }
+
+
+    public async Task<bool> CanUserReadGlobalScopedResourceAsync(Guid actorUserId, string permissionCode, CancellationToken cancellationToken)
+    {
+        return await CanUserPerformAtRootAsync(actorUserId, permissionCode, cancellationToken);
     }
     public async Task<bool> CanAccessUserAsync(Guid actorUserId, string permissionCode, Guid targetUserId, CancellationToken cancellationToken)
     {

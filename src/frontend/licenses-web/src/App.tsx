@@ -26,6 +26,9 @@ type SubmitLeaveRequestResult = { request: LeaveRequest; warnings: string[]; was
 type AuditEvent = { id: string; occurredAtUtc: string; action: string; resourceType: string; resourceId: string | null; actorUserId: string | null; actorDisplayName: string | null; subjectUserId: string | null; subjectDisplayName: string | null; orgUnitId: string | null; orgUnitName: string | null; correlationId: string | null; metadataJson: string | null };
 type AuditEventListResult = { items: AuditEvent[]; page: number; pageSize: number; totalCount: number; hasNextPage: boolean };
 type AuditFilters = { action: string; resourceType: string; fromUtc: string; toUtc: string; page: number; pageSize: number };
+type Role = { id: string; code: string; name: string; description: string; isActive: boolean };
+type UserOrgAssignment = { id: string; userId: string; orgUnitId: string; orgUnitName: string; isPrimary: boolean; effectiveFromUtc: string; effectiveToUtc: string | null };
+type RoleScopeAssignment = { id: string; userId: string; roleId: string; roleCode: string; orgUnitId: string; includeDescendants: boolean; effectiveFromUtc: string; effectiveToUtc: string | null };
 
 type StatusCardProps = { label: string; status: HealthStatus };
 type CatalogKind = 'leave-types' | 'balance-buckets';
@@ -50,21 +53,35 @@ async function fetchHealth(path: string): Promise<HealthStatus> {
   }
 }
 
+async function readApiError(response: Response): Promise<string> {
+  const fallback = response.status === 403
+    ? 'You do not have authority for this scope or operation.'
+    : response.status === 404
+      ? 'The requested user, role, or org unit was not found or is outside your scope.'
+      : `Request failed: ${response.status}`;
+  try {
+    const payload = await response.json() as { error?: string; title?: string; detail?: string };
+    return payload.error ?? payload.detail ?? payload.title ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 async function fetchJson<T>(path: string, actorId: string | null = null): Promise<T> {
   const response = await fetch(`${endpointPrefix}${path}`, { headers: developmentHeaders(actorId) });
-  if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+  if (!response.ok) throw new Error(await readApiError(response));
   return (await response.json()) as T;
 }
 
 async function sendMultipart<T>(path: string, body: FormData, actorId: string | null): Promise<T> {
   const response = await fetch(`${endpointPrefix}${path}`, { method: 'POST', headers: developmentHeaders(actorId), body });
-  if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+  if (!response.ok) throw new Error(await readApiError(response));
   return (await response.json()) as T;
 }
 
 async function downloadDocument(documentId: string, fileName: string, actorId: string | null): Promise<void> {
   const response = await fetch(`${endpointPrefix}/leave-request-documents/${documentId}/content`, { headers: developmentHeaders(actorId) });
-  if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+  if (!response.ok) throw new Error(await readApiError(response));
   const blob = await response.blob();
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
@@ -80,8 +97,28 @@ async function sendJson<T>(path: string, method: 'POST' | 'PUT', body: unknown, 
     headers: { 'Content-Type': 'application/json', ...developmentHeaders(actorId) },
     body: JSON.stringify(body),
   });
-  if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+  if (!response.ok) throw new Error(await readApiError(response));
   return (await response.json()) as T;
+}
+
+function dateInputToUtc(value: FormDataEntryValue | null): string | null {
+  if (!value) return null;
+  const text = String(value);
+  return text ? new Date(`${text}T00:00:00Z`).toISOString() : null;
+}
+
+function toDateInput(value: string | null): string {
+  return value ? value.slice(0, 10) : '';
+}
+
+function orgUnitLabel(units: OrgUnit[], id: string): string {
+  const unit = flattenOrgUnits(units).find((candidate) => candidate.id === id);
+  return unit ? `${unit.code} - ${unit.name}` : id;
+}
+
+function isCurrentAssignment(effectiveFromUtc: string, effectiveToUtc: string | null): boolean {
+  const now = Date.now();
+  return new Date(effectiveFromUtc).getTime() <= now && (!effectiveToUtc || new Date(effectiveToUtc).getTime() > now);
 }
 
 function versionPayloadFromForm(data: FormData) {
@@ -166,8 +203,18 @@ export function App() {
   const [auditFilters, setAuditFilters] = useState<AuditFilters>({ action: '', resourceType: '', fromUtc: '', toUtc: '', page: 1, pageSize: 25 });
   const [auditMessage, setAuditMessage] = useState<string | null>(null);
   const [canReadAudit, setCanReadAudit] = useState(false);
+  const [selectedAdminUserId, setSelectedAdminUserId] = useState<string>('');
+  const [roles, setRoles] = useState<Role[]>([]);
+  const [orgAssignments, setOrgAssignments] = useState<UserOrgAssignment[]>([]);
+  const [roleScopes, setRoleScopes] = useState<RoleScopeAssignment[]>([]);
+  const [adminMessage, setAdminMessage] = useState<string | null>(null);
+  const [canReadUsers, setCanReadUsers] = useState(false);
+  const [canManageRoleScopes, setCanManageRoleScopes] = useState(false);
 
   const selectedActor = useMemo(() => actors.find((actor) => actor.id === selectedActorId) ?? null, [actors, selectedActorId]);
+  const selectedAdminUser = useMemo(() => users.find((user) => user.id === selectedAdminUserId) ?? users[0] ?? null, [selectedAdminUserId, users]);
+  const selectedAdminUserIsActor = selectedActorId !== null && selectedAdminUser?.id === selectedActorId;
+  const visibleOrgUnits = useMemo(() => flattenOrgUnits(orgTree).filter((unit) => unit.isActive), [orgTree]);
 
   async function loadCatalog(actorId: string | null) {
     const [types, buckets] = await Promise.all([
@@ -218,6 +265,29 @@ export function App() {
       setPendingCancellations(await fetchJson<LeaveRequest[]>('/leave-requests/pending-cancellation', actorId));
     } catch {
       setPendingCancellations([]);
+    }
+  }
+
+  async function loadAdminDetails(userId: string, actorId: string | null) {
+    if (!userId) {
+      setOrgAssignments([]);
+      setRoleScopes([]);
+      return;
+    }
+    const assignments = await fetchJson<UserOrgAssignment[]>(`/users/${userId}/org-assignments`, actorId);
+    setOrgAssignments(assignments);
+    try {
+      const [roleList, scopes] = await Promise.all([
+        fetchJson<Role[]>('/roles', actorId),
+        fetchJson<RoleScopeAssignment[]>(`/users/${userId}/role-scopes`, actorId),
+      ]);
+      setRoles(roleList);
+      setRoleScopes(scopes);
+      setCanManageRoleScopes(true);
+    } catch {
+      setRoles([]);
+      setRoleScopes([]);
+      setCanManageRoleScopes(false);
     }
   }
 
@@ -281,12 +351,18 @@ export function App() {
         if (isMounted) {
           setOrgTree(tree);
           setUsers(userList);
+          setCanReadUsers(true);
+          const nextAdminUserId = selectedAdminUserId || userList[0]?.id || '';
+          if (!selectedAdminUserId && nextAdminUserId) setSelectedAdminUserId(nextAdminUserId);
+          if (nextAdminUserId) await loadAdminDetails(nextAdminUserId, selectedActorId);
           setAdminError(null);
         }
       } catch (error) {
         if (isMounted) {
           setOrgTree([]);
           setUsers([]);
+          setCanReadUsers(false);
+          setSelectedAdminUserId('');
           setAdminError(error instanceof Error ? error.message : 'Unable to load admin data.');
         }
       }
@@ -363,11 +439,161 @@ export function App() {
     return () => {
       isMounted = false;
     };
-  }, [loadAuditEvents, loadUserBalances, selectedActorId, selectedBalanceUserId]);
+  }, [loadAuditEvents, loadUserBalances, selectedActorId, selectedAdminUserId, selectedBalanceUserId]);
+
 
   function changeSelectedActor(actorId: string) {
     setSelectedActorId(actorId);
     localStorage.setItem(selectedActorStorageKey, actorId);
+  }
+
+  async function refreshAdministration(userId = selectedAdminUser?.id ?? '') {
+    const userList = await fetchJson<User[]>('/users', selectedActorId);
+    setUsers(userList);
+    setCanReadUsers(true);
+    if (userId) await loadAdminDetails(userId, selectedActorId);
+  }
+
+  async function createInternalUser(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    try {
+      const created = await sendJson<User>('/users', 'POST', { displayName: data.get('displayName'), email: data.get('email') }, selectedActorId);
+      event.currentTarget.reset();
+      setSelectedAdminUserId(created.id);
+      await refreshAdministration(created.id);
+      setAdminMessage('Internal application user created. No local credentials were created.');
+    } catch (error) {
+      setAdminMessage(error instanceof Error ? error.message : 'Unable to create user.');
+    }
+  }
+
+  async function updateInternalUser(event: FormEvent<HTMLFormElement>, userId: string) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    try {
+      await sendJson<User>(`/users/${userId}`, 'PUT', { displayName: data.get('displayName'), email: data.get('email') }, selectedActorId);
+      await refreshAdministration(userId);
+      setAdminMessage('User profile updated.');
+    } catch (error) {
+      setAdminMessage(error instanceof Error ? error.message : 'Unable to update user.');
+    }
+  }
+
+  async function setUserActive(user: User, isActive: boolean) {
+    if (!isActive && !window.confirm(`Deactivate ${user.displayName}? They will remain as an application user record.`)) return;
+    try {
+      await sendJson<User>(`/users/${user.id}/${isActive ? 'activate' : 'deactivate'}`, 'POST', {}, selectedActorId);
+      await refreshAdministration(user.id);
+      setAdminMessage(isActive ? 'User activated.' : 'User deactivated.');
+    } catch (error) {
+      setAdminMessage(error instanceof Error ? error.message : 'Unable to update user state.');
+    }
+  }
+
+  async function createOrgAssignment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedAdminUser) return;
+    const data = new FormData(event.currentTarget);
+    try {
+      await sendJson<UserOrgAssignment>(`/users/${selectedAdminUser.id}/org-assignments`, 'POST', {
+        orgUnitId: data.get('orgUnitId'),
+        isPrimary: data.get('isPrimary') === 'on',
+        effectiveFromUtc: dateInputToUtc(data.get('effectiveFromUtc')),
+        effectiveToUtc: dateInputToUtc(data.get('effectiveToUtc')),
+      }, selectedActorId);
+      event.currentTarget.reset();
+      await refreshAdministration(selectedAdminUser.id);
+      setAdminMessage('Organization assignment saved.');
+    } catch (error) {
+      setAdminMessage(error instanceof Error ? error.message : 'Unable to save organization assignment.');
+    }
+  }
+
+  async function updateOrgAssignment(event: FormEvent<HTMLFormElement>, assignmentId: string) {
+    event.preventDefault();
+    if (!selectedAdminUser) return;
+    const data = new FormData(event.currentTarget);
+    try {
+      await sendJson<UserOrgAssignment>(`/users/${selectedAdminUser.id}/org-assignments/${assignmentId}`, 'PUT', {
+        orgUnitId: data.get('orgUnitId'),
+        isPrimary: data.get('isPrimary') === 'on',
+        effectiveFromUtc: dateInputToUtc(data.get('effectiveFromUtc')),
+        effectiveToUtc: dateInputToUtc(data.get('effectiveToUtc')),
+      }, selectedActorId);
+      await refreshAdministration(selectedAdminUser.id);
+      setAdminMessage('Organization assignment updated.');
+    } catch (error) {
+      setAdminMessage(error instanceof Error ? error.message : 'Unable to update organization assignment.');
+    }
+  }
+
+  async function endOrgAssignment(event: FormEvent<HTMLFormElement>, assignmentId: string) {
+    event.preventDefault();
+    if (!selectedAdminUser) return;
+    const data = new FormData(event.currentTarget);
+    try {
+      await sendJson<UserOrgAssignment>(`/users/${selectedAdminUser.id}/org-assignments/${assignmentId}/end`, 'POST', {
+        effectiveToUtc: dateInputToUtc(data.get('effectiveToUtc')),
+      }, selectedActorId);
+      await refreshAdministration(selectedAdminUser.id);
+      setAdminMessage('Organization assignment ended.');
+    } catch (error) {
+      setAdminMessage(error instanceof Error ? error.message : 'Unable to end organization assignment.');
+    }
+  }
+
+  async function assignRoleScope(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedAdminUser || selectedAdminUserIsActor) return;
+    const data = new FormData(event.currentTarget);
+    try {
+      await sendJson<RoleScopeAssignment>(`/users/${selectedAdminUser.id}/role-scopes`, 'POST', {
+        roleId: data.get('roleId'),
+        orgUnitId: data.get('orgUnitId'),
+        includeDescendants: data.get('includeDescendants') === 'on',
+        effectiveFromUtc: dateInputToUtc(data.get('effectiveFromUtc')),
+        effectiveToUtc: dateInputToUtc(data.get('effectiveToUtc')),
+      }, selectedActorId);
+      event.currentTarget.reset();
+      await refreshAdministration(selectedAdminUser.id);
+      setAdminMessage('Role scope assigned.');
+    } catch (error) {
+      setAdminMessage(error instanceof Error ? error.message : 'Unable to assign role scope.');
+    }
+  }
+
+  async function updateRoleScope(event: FormEvent<HTMLFormElement>, assignmentId: string) {
+    event.preventDefault();
+    if (!selectedAdminUser || selectedAdminUserIsActor) return;
+    const data = new FormData(event.currentTarget);
+    try {
+      await sendJson<RoleScopeAssignment>(`/users/${selectedAdminUser.id}/role-scopes/${assignmentId}`, 'PUT', {
+        orgUnitId: data.get('orgUnitId'),
+        includeDescendants: data.get('includeDescendants') === 'on',
+        effectiveFromUtc: dateInputToUtc(data.get('effectiveFromUtc')),
+        effectiveToUtc: dateInputToUtc(data.get('effectiveToUtc')),
+      }, selectedActorId);
+      await refreshAdministration(selectedAdminUser.id);
+      setAdminMessage('Role scope updated.');
+    } catch (error) {
+      setAdminMessage(error instanceof Error ? error.message : 'Unable to update role scope.');
+    }
+  }
+
+  async function revokeRoleScope(event: FormEvent<HTMLFormElement>, assignmentId: string) {
+    event.preventDefault();
+    if (!selectedAdminUser || selectedAdminUserIsActor) return;
+    const data = new FormData(event.currentTarget);
+    try {
+      await sendJson<RoleScopeAssignment>(`/users/${selectedAdminUser.id}/role-scopes/${assignmentId}/revoke`, 'POST', {
+        effectiveToUtc: dateInputToUtc(data.get('effectiveToUtc')),
+      }, selectedActorId);
+      await refreshAdministration(selectedAdminUser.id);
+      setAdminMessage('Role scope revoked.');
+    } catch (error) {
+      setAdminMessage(error instanceof Error ? error.message : 'Unable to revoke role scope.');
+    }
   }
 
   async function applyAuditFilters(event: FormEvent<HTMLFormElement>) {
@@ -794,6 +1020,115 @@ export function App() {
           {selectedActor ? <p className="muted">Current actor: {selectedActor.displayName}</p> : null}
         </div>
       </section>
+
+      {canReadUsers ? <section className="admin-panel" aria-label="Administration">
+        <div>
+          <p className="eyebrow">Administration</p>
+          <h2>Users, organizational assignments, and role scopes</h2>
+          <p className="muted">These are application user records, not local login accounts. The backend remains authoritative for every mutation.</p>
+          {adminMessage ? <p className={adminMessage.includes('authority') || adminMessage.includes('failed') || adminMessage.includes('not found') ? 'error' : 'muted'}>{adminMessage}</p> : null}
+          {adminError ? <p className="error">{adminError}</p> : null}
+        </div>
+        <div className="admin-grid">
+          <article className="panel-card">
+            <h3>Internal users</h3>
+            <div className="catalog-list">
+              {users.map((user) => (
+                <button type="button" className={`catalog-row selectable-row ${selectedAdminUser?.id === user.id ? 'selected' : ''}`} key={user.id} onClick={() => { setSelectedAdminUserId(user.id); void loadAdminDetails(user.id, selectedActorId); }}>
+                  <span>{user.displayName}</span>
+                  <span>{user.email}</span>
+                  <span className={`badge ${user.isActive ? 'published' : 'draft'}`}>{user.isActive ? 'Active' : 'Inactive'}</span>
+                  <span>{user.primaryOrgUnit?.name ?? 'No primary unit'}</span>
+                </button>
+              ))}
+            </div>
+          </article>
+          <form className="panel-card catalog-form" onSubmit={createInternalUser}>
+            <h3>Create internal user</h3>
+            <p className="muted">Creates the application record only. No password, token, local login, or external identity is created.</p>
+            <input name="displayName" placeholder="Display name" required />
+            <input name="email" type="email" placeholder="email@example.com" required />
+            <button type="submit">Create user</button>
+          </form>
+        </div>
+
+        {selectedAdminUser ? <div className="admin-grid">
+          <form className="panel-card catalog-form" onSubmit={(event) => updateInternalUser(event, selectedAdminUser.id)}>
+            <h3>User profile</h3>
+            <input name="displayName" placeholder="Display name" required defaultValue={selectedAdminUser.displayName} />
+            <input name="email" type="email" placeholder="email@example.com" required defaultValue={selectedAdminUser.email} />
+            <p className="muted">External identity and credentials are intentionally not editable here.</p>
+            <button type="submit">Update profile</button>
+            {selectedAdminUser.isActive
+              ? <button type="button" onClick={() => void setUserActive(selectedAdminUser, false)}>Deactivate</button>
+              : <button type="button" onClick={() => void setUserActive(selectedAdminUser, true)}>Activate</button>}
+          </form>
+          <form className="panel-card catalog-form" onSubmit={createOrgAssignment}>
+            <h3>Create organization assignment</h3>
+            <select name="orgUnitId" required><option value="">Select org unit</option>{visibleOrgUnits.map((unit) => <option key={unit.id} value={unit.id}>{unit.code} - {unit.name}</option>)}</select>
+            <label><input name="isPrimary" type="checkbox" /> Primary assignment</label>
+            <input name="effectiveFromUtc" type="date" required />
+            <input name="effectiveToUtc" type="date" />
+            <button type="submit">Create assignment</button>
+          </form>
+        </div> : null}
+
+        {selectedAdminUser ? <article className="panel-card">
+          <h3>Organization assignments for {selectedAdminUser.displayName}</h3>
+          {orgAssignments.length === 0 ? <p className="muted">No assignments visible.</p> : null}
+          <div className="catalog-list">
+            {orgAssignments.map((assignment) => (
+              <details className="version-row" key={assignment.id}>
+                <summary><strong>{assignment.orgUnitName}</strong> <span className={`badge ${isCurrentAssignment(assignment.effectiveFromUtc, assignment.effectiveToUtc) ? 'published' : 'draft'}`}>{isCurrentAssignment(assignment.effectiveFromUtc, assignment.effectiveToUtc) ? 'Current' : 'Historical'}</span> <span>{assignment.isPrimary ? 'Primary' : 'Secondary'}</span> <span>{toDateInput(assignment.effectiveFromUtc)} to {toDateInput(assignment.effectiveToUtc) || 'open'}</span></summary>
+                <form className="catalog-form inline-form" onSubmit={(event) => updateOrgAssignment(event, assignment.id)}>
+                  <select name="orgUnitId" required defaultValue={assignment.orgUnitId}>{visibleOrgUnits.map((unit) => <option key={unit.id} value={unit.id}>{unit.code} - {unit.name}</option>)}</select>
+                  <label><input name="isPrimary" type="checkbox" defaultChecked={assignment.isPrimary} /> Primary assignment</label>
+                  <input name="effectiveFromUtc" type="date" required defaultValue={toDateInput(assignment.effectiveFromUtc)} />
+                  <input name="effectiveToUtc" type="date" defaultValue={toDateInput(assignment.effectiveToUtc)} />
+                  <button type="submit">Update assignment</button>
+                </form>
+                <form className="catalog-form inline-form" onSubmit={(event) => endOrgAssignment(event, assignment.id)}>
+                  <input name="effectiveToUtc" type="date" required defaultValue={toDateInput(new Date().toISOString())} />
+                  <button type="submit">End assignment</button>
+                </form>
+              </details>
+            ))}
+          </div>
+        </article> : null}
+
+        {selectedAdminUser && canManageRoleScopes ? <section className="panel-card">
+          <h3>Role scopes for {selectedAdminUser.displayName}</h3>
+          {selectedAdminUserIsActor ? <p className="warning">Self role-scope mutation is disabled here because the backend forbids self-escalation and self-lockout.</p> : null}
+          <form className="catalog-form" onSubmit={assignRoleScope}>
+            <h4>Assign existing role</h4>
+            <select name="roleId" required disabled={selectedAdminUserIsActor}><option value="">Select role</option>{roles.filter((role) => role.isActive).map((role) => <option key={role.id} value={role.id}>{role.code} - {role.name}</option>)}</select>
+            <select name="orgUnitId" required disabled={selectedAdminUserIsActor}><option value="">Select org unit</option>{visibleOrgUnits.map((unit) => <option key={unit.id} value={unit.id}>{unit.code} - {unit.name}</option>)}</select>
+            <label><input name="includeDescendants" type="checkbox" disabled={selectedAdminUserIsActor} /> Include descendants</label>
+            <input name="effectiveFromUtc" type="date" required disabled={selectedAdminUserIsActor} />
+            <input name="effectiveToUtc" type="date" disabled={selectedAdminUserIsActor} />
+            <button type="submit" disabled={selectedAdminUserIsActor}>Assign role scope</button>
+          </form>
+          {roleScopes.length === 0 ? <p className="muted">No role scopes visible.</p> : null}
+          <div className="catalog-list inline-form">
+            {roleScopes.map((scope) => (
+              <details className="version-row" key={scope.id}>
+                <summary><strong>{scope.roleCode}</strong> <span>{orgUnitLabel(orgTree, scope.orgUnitId)}</span> <span>{scope.includeDescendants ? 'Includes descendants' : 'Exact unit'}</span> <span className={`badge ${isCurrentAssignment(scope.effectiveFromUtc, scope.effectiveToUtc) ? 'published' : 'draft'}`}>{isCurrentAssignment(scope.effectiveFromUtc, scope.effectiveToUtc) ? 'Current' : 'Historical'}</span></summary>
+                <form className="catalog-form inline-form" onSubmit={(event) => updateRoleScope(event, scope.id)}>
+                  <select name="orgUnitId" required defaultValue={scope.orgUnitId} disabled={selectedAdminUserIsActor}>{visibleOrgUnits.map((unit) => <option key={unit.id} value={unit.id}>{unit.code} - {unit.name}</option>)}</select>
+                  <label><input name="includeDescendants" type="checkbox" defaultChecked={scope.includeDescendants} disabled={selectedAdminUserIsActor} /> Include descendants</label>
+                  <input name="effectiveFromUtc" type="date" required defaultValue={toDateInput(scope.effectiveFromUtc)} disabled={selectedAdminUserIsActor} />
+                  <input name="effectiveToUtc" type="date" defaultValue={toDateInput(scope.effectiveToUtc)} disabled={selectedAdminUserIsActor} />
+                  <button type="submit" disabled={selectedAdminUserIsActor}>Update role scope</button>
+                </form>
+                <form className="catalog-form inline-form" onSubmit={(event) => revokeRoleScope(event, scope.id)}>
+                  <input name="effectiveToUtc" type="date" required defaultValue={toDateInput(new Date().toISOString())} disabled={selectedAdminUserIsActor} />
+                  <button type="submit" disabled={selectedAdminUserIsActor}>Revoke role scope</button>
+                </form>
+              </details>
+            ))}
+          </div>
+        </section> : null}
+      </section> : null}
 
       <section className="admin-panel" aria-label="Leave catalog admin">
         <div>

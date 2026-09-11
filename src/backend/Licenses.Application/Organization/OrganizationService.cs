@@ -121,21 +121,66 @@ public sealed class OrganizationService(IOrganizationRepository repository, Time
         return (await ToUserDtosAsync([user], cancellationToken)).Single();
     }
 
-    public async Task<UserDto> CreateUserAsync(CreateUserCommand command, CancellationToken cancellationToken)
+    public async Task<UserDto> CreateUserAsync(CreateUserCommand command, CancellationToken cancellationToken, Guid? actorUserId = null)
     {
+        await ValidateEmailAsync(command.Email, excludingId: null, cancellationToken);
         await ValidateExternalIdentityAsync(command.ExternalIdentityId, excludingId: null, cancellationToken);
         var user = User.Create(command.DisplayName, command.Email, command.ExternalIdentityId, UtcNow());
         await repository.AddUserAsync(user, cancellationToken);
+        await auditWriter.WriteAsync(new AuditEventData(
+            actorUserId,
+            "user.create",
+            "User",
+            user.Id,
+            user.Id,
+            null,
+            null,
+            UtcNow(),
+            AuditMetadataJson.Serialize(new
+            {
+                subjectUserId = user.Id,
+                email = user.Email,
+                isActive = user.IsActive,
+                hasExternalIdentity = user.ExternalIdentityId is not null
+            })),
+            cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
         return ToDto(user, null);
     }
 
-    public async Task<UserDto?> UpdateUserAsync(Guid id, UpdateUserCommand command, CancellationToken cancellationToken)
+    public async Task<UserDto?> UpdateUserAsync(Guid id, UpdateUserCommand command, CancellationToken cancellationToken, Guid? actorUserId = null)
     {
         var user = await repository.GetUserAsync(id, cancellationToken);
         if (user is null) return null;
+        await ValidateEmailAsync(command.Email, id, cancellationToken);
         await ValidateExternalIdentityAsync(command.ExternalIdentityId, id, cancellationToken);
+        var previousDisplayName = user.DisplayName;
+        var previousEmail = user.Email;
+        var previousIsActive = user.IsActive;
+        var previousHasExternalIdentity = user.ExternalIdentityId is not null;
         user.Update(command.DisplayName, command.Email, command.ExternalIdentityId, command.IsActive, UtcNow());
+        await auditWriter.WriteAsync(new AuditEventData(
+            actorUserId,
+            previousIsActive == user.IsActive ? "user.update" : user.IsActive ? "user.activate" : "user.deactivate",
+            "User",
+            user.Id,
+            user.Id,
+            null,
+            null,
+            UtcNow(),
+            AuditMetadataJson.Serialize(new
+            {
+                subjectUserId = user.Id,
+                previousDisplayName,
+                displayName = user.DisplayName,
+                previousEmail,
+                email = user.Email,
+                previousIsActive,
+                isActive = user.IsActive,
+                previousHasExternalIdentity,
+                hasExternalIdentity = user.ExternalIdentityId is not null
+            })),
+            cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
         return (await ToUserDtosAsync([user], cancellationToken)).Single();
     }
@@ -152,7 +197,7 @@ public sealed class OrganizationService(IOrganizationRepository repository, Time
     {
         if (await repository.GetUserAsync(userId, cancellationToken) is null) return null;
         if (!await repository.OrgUnitExistsAsync(command.OrgUnitId, cancellationToken)) throw new InvalidOperationException("Organizational unit does not exist.");
-        if (command.IsPrimary && await repository.HasOverlappingPrimaryAssignmentAsync(userId, command.EffectiveFromUtc, command.EffectiveToUtc, cancellationToken))
+        if (command.IsPrimary && await repository.HasOverlappingPrimaryAssignmentAsync(userId, command.EffectiveFromUtc, command.EffectiveToUtc, excludingAssignmentId: null, cancellationToken))
         {
             throw new InvalidOperationException("A user can have at most one active primary organizational assignment.");
         }
@@ -180,6 +225,78 @@ public sealed class OrganizationService(IOrganizationRepository repository, Time
         return ToDto(assignment, unit?.Name ?? string.Empty);
     }
 
+    public async Task<UserOrgAssignmentDto?> UpdateAssignmentAsync(Guid userId, Guid assignmentId, UpdateUserOrgAssignmentCommand command, CancellationToken cancellationToken, Guid? actorUserId = null)
+    {
+        if (await repository.GetUserAsync(userId, cancellationToken) is null) return null;
+        var assignment = await repository.GetAssignmentAsync(userId, assignmentId, cancellationToken);
+        if (assignment is null) return null;
+        if (!await repository.OrgUnitExistsAsync(command.OrgUnitId, cancellationToken)) throw new InvalidOperationException("Organizational unit does not exist.");
+        if (command.IsPrimary && await repository.HasOverlappingPrimaryAssignmentAsync(userId, command.EffectiveFromUtc, command.EffectiveToUtc, assignmentId, cancellationToken))
+        {
+            throw new InvalidOperationException("A user can have at most one active primary organizational assignment.");
+        }
+
+        var previousOrgUnitId = assignment.OrgUnitId;
+        var previousIsPrimary = assignment.IsPrimary;
+        var previousEffectiveFromUtc = assignment.EffectiveFromUtc;
+        var previousEffectiveToUtc = assignment.EffectiveToUtc;
+        assignment.Update(command.OrgUnitId, command.IsPrimary, command.EffectiveFromUtc, command.EffectiveToUtc);
+        await auditWriter.WriteAsync(new AuditEventData(
+            actorUserId,
+            "organization.assignment.update",
+            "UserOrgAssignment",
+            assignment.Id,
+            userId,
+            assignment.OrgUnitId,
+            null,
+            UtcNow(),
+            AuditMetadataJson.Serialize(new
+            {
+                previousOrgUnitId,
+                orgUnitId = assignment.OrgUnitId,
+                previousIsPrimary,
+                isPrimary = assignment.IsPrimary,
+                previousEffectiveFromUtc,
+                effectiveFromUtc = assignment.EffectiveFromUtc,
+                previousEffectiveToUtc,
+                effectiveToUtc = assignment.EffectiveToUtc
+            })),
+            cancellationToken);
+        await repository.SaveChangesAsync(cancellationToken);
+        var unit = await repository.GetOrgUnitAsync(command.OrgUnitId, cancellationToken);
+        return ToDto(assignment, unit?.Name ?? string.Empty);
+    }
+
+    public async Task<UserOrgAssignmentDto?> EndAssignmentAsync(Guid userId, Guid assignmentId, EndUserOrgAssignmentCommand command, CancellationToken cancellationToken, Guid? actorUserId = null)
+    {
+        if (await repository.GetUserAsync(userId, cancellationToken) is null) return null;
+        var assignment = await repository.GetAssignmentAsync(userId, assignmentId, cancellationToken);
+        if (assignment is null) return null;
+
+        var previousEffectiveToUtc = assignment.EffectiveToUtc;
+        assignment.End(command.EffectiveToUtc);
+        await auditWriter.WriteAsync(new AuditEventData(
+            actorUserId,
+            "organization.assignment.end",
+            "UserOrgAssignment",
+            assignment.Id,
+            userId,
+            assignment.OrgUnitId,
+            null,
+            UtcNow(),
+            AuditMetadataJson.Serialize(new
+            {
+                orgUnitId = assignment.OrgUnitId,
+                isPrimary = assignment.IsPrimary,
+                previousEffectiveToUtc,
+                effectiveToUtc = assignment.EffectiveToUtc
+            })),
+            cancellationToken);
+        await repository.SaveChangesAsync(cancellationToken);
+        var unit = await repository.GetOrgUnitAsync(assignment.OrgUnitId, cancellationToken);
+        return ToDto(assignment, unit?.Name ?? string.Empty);
+    }
+
     private async Task<List<UserDto>> ToUserDtosAsync(IReadOnlyCollection<User> users, CancellationToken cancellationToken)
     {
         var units = (await repository.ListOrgUnitsAsync(cancellationToken)).ToDictionary(x => x.Id);
@@ -201,6 +318,13 @@ public sealed class OrganizationService(IOrganizationRepository repository, Time
             throw new InvalidOperationException("Organizational unit code must be unique.");
         if (parentId is not null && !await repository.OrgUnitExistsAsync(parentId.Value, cancellationToken))
             throw new InvalidOperationException("Parent organizational unit does not exist.");
+    }
+
+    private async Task ValidateEmailAsync(string email, Guid? excludingId, CancellationToken cancellationToken)
+    {
+        var normalizedEmail = email.Trim().ToUpperInvariant();
+        if (await repository.EmailExistsAsync(normalizedEmail, excludingId, cancellationToken))
+            throw new InvalidOperationException("User email must be unique.");
     }
 
     private async Task ValidateExternalIdentityAsync(string? externalIdentityId, Guid? excludingId, CancellationToken cancellationToken)

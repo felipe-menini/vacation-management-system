@@ -54,6 +54,9 @@ public sealed class EfOrganizationRepository(ApplicationDbContext dbContext) : I
     public Task<User?> GetUserAsync(Guid id, CancellationToken cancellationToken) =>
         dbContext.Users.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 
+    public Task<bool> EmailExistsAsync(string email, Guid? excludingId, CancellationToken cancellationToken) =>
+        dbContext.Users.AnyAsync(x => x.Email == email && (excludingId == null || x.Id != excludingId), cancellationToken);
+
     public Task<bool> ExternalIdentityIdExistsAsync(string externalIdentityId, Guid? excludingId, CancellationToken cancellationToken) =>
         dbContext.Users.AnyAsync(x => x.ExternalIdentityId == externalIdentityId && (excludingId == null || x.Id != excludingId), cancellationToken);
 
@@ -62,9 +65,13 @@ public sealed class EfOrganizationRepository(ApplicationDbContext dbContext) : I
     public Task<List<UserOrgAssignment>> ListAssignmentsAsync(Guid userId, CancellationToken cancellationToken) =>
         dbContext.UserOrgAssignments.AsNoTracking().Where(x => x.UserId == userId).OrderByDescending(x => x.EffectiveFromUtc).ToListAsync(cancellationToken);
 
-    public Task<bool> HasOverlappingPrimaryAssignmentAsync(Guid userId, DateTime effectiveFromUtc, DateTime? effectiveToUtc, CancellationToken cancellationToken) =>
+    public Task<UserOrgAssignment?> GetAssignmentAsync(Guid userId, Guid assignmentId, CancellationToken cancellationToken) =>
+        dbContext.UserOrgAssignments.FirstOrDefaultAsync(x => x.UserId == userId && x.Id == assignmentId, cancellationToken);
+
+    public Task<bool> HasOverlappingPrimaryAssignmentAsync(Guid userId, DateTime effectiveFromUtc, DateTime? effectiveToUtc, Guid? excludingAssignmentId, CancellationToken cancellationToken) =>
         dbContext.UserOrgAssignments.AnyAsync(x =>
             x.UserId == userId
+            && (excludingAssignmentId == null || x.Id != excludingAssignmentId)
             && x.IsPrimary
             && x.EffectiveFromUtc < (effectiveToUtc ?? DateTime.MaxValue)
             && (x.EffectiveToUtc ?? DateTime.MaxValue) > effectiveFromUtc,

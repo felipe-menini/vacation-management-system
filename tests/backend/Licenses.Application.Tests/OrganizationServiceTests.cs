@@ -64,6 +64,38 @@ public sealed class OrganizationServiceTests
     }
 
     [Fact]
+    public async Task CreatesUpdatesDeactivatesAndReactivatesUserWithAudit()
+    {
+        var actorId = Guid.NewGuid();
+
+        var user = await _service.CreateUserAsync(new("Felipe", "felipe@example.test", null), CancellationToken.None, actorId);
+        var updated = await _service.UpdateUserAsync(user.Id, new("Felipe Updated", "felipe.updated@example.test", null, false), CancellationToken.None, actorId);
+        var reactivated = await _service.UpdateUserAsync(user.Id, new("Felipe Updated", "felipe.updated@example.test", null, true), CancellationToken.None, actorId);
+
+        Assert.False(updated!.IsActive);
+        Assert.True(reactivated!.IsActive);
+        Assert.Equal(["user.create", "user.deactivate", "user.activate"], _auditWriter.Events.Select(x => x.Action).ToArray());
+        Assert.All(_auditWriter.Events, auditEvent =>
+        {
+            Assert.Equal(actorId, auditEvent.ActorUserId);
+            Assert.Equal(user.Id, auditEvent.SubjectUserId);
+            Assert.Equal("User", auditEvent.ResourceType);
+            Assert.Equal(user.Id, auditEvent.ResourceId);
+        });
+    }
+
+    [Fact]
+    public async Task PreventsDuplicateUserEmail()
+    {
+        await _service.CreateUserAsync(new("Felipe", "felipe@example.test", null), CancellationToken.None);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _service.CreateUserAsync(new("Other", "FELIPE@example.test", null), CancellationToken.None));
+
+        Assert.Contains("email", ex.Message);
+    }
+
+    [Fact]
     public async Task AllowsMultipleAssignmentsButOnlyOneActivePrimary()
     {
         var it = await _service.CreateOrgUnitAsync(new("IT", "IT", null), CancellationToken.None);
@@ -79,6 +111,32 @@ public sealed class OrganizationServiceTests
         var assignments = await _service.ListAssignmentsAsync(user.Id, CancellationToken.None);
         Assert.Equal(2, assignments!.Count);
         Assert.Contains("primary", ex.Message);
+    }
+
+    [Fact]
+    public async Task UpdatesAndEndsUserOrgAssignmentWithAudit()
+    {
+        var actorId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+        var it = await _service.CreateOrgUnitAsync(new("IT", "IT", null), CancellationToken.None);
+        var support = await _service.CreateOrgUnitAsync(new("Support", "SUPPORT", it.Id), CancellationToken.None);
+        var user = await _service.CreateUserAsync(new("Felipe", "felipe@example.test", null), CancellationToken.None);
+        var assignment = await _service.CreateAssignmentAsync(user.Id, new(it.Id, false, now.AddDays(-2), null), CancellationToken.None);
+        _auditWriter.Events.Clear();
+
+        var updated = await _service.UpdateAssignmentAsync(user.Id, assignment!.Id, new(support.Id, true, now.AddDays(-1), null), CancellationToken.None, actorId);
+        var ended = await _service.EndAssignmentAsync(user.Id, assignment.Id, new(now), CancellationToken.None, actorId);
+
+        Assert.Equal(support.Id, updated!.OrgUnitId);
+        Assert.True(updated.IsPrimary);
+        Assert.Equal(now, ended!.EffectiveToUtc);
+        Assert.Equal(["organization.assignment.update", "organization.assignment.end"], _auditWriter.Events.Select(x => x.Action).ToArray());
+        Assert.All(_auditWriter.Events, auditEvent =>
+        {
+            Assert.Equal(actorId, auditEvent.ActorUserId);
+            Assert.Equal(user.Id, auditEvent.SubjectUserId);
+            Assert.Equal("UserOrgAssignment", auditEvent.ResourceType);
+        });
     }
 
     [Fact]
@@ -172,12 +230,15 @@ public sealed class OrganizationServiceTests
         public Task<List<User>> ListUsersAsync(CancellationToken cancellationToken) => Task.FromResult(_users.OrderBy(x => x.DisplayName).ToList());
         public Task<List<User>> ListUsersInOrgUnitsAsync(IReadOnlyCollection<Guid> orgUnitIds, DateTime utcNow, CancellationToken cancellationToken) => Task.FromResult(_users.Where(user => user.IsActive && _assignments.Any(assignment => assignment.UserId == user.Id && orgUnitIds.Contains(assignment.OrgUnitId) && assignment.IsActiveAt(utcNow))).OrderBy(x => x.DisplayName).ToList());
         public Task<User?> GetUserAsync(Guid id, CancellationToken cancellationToken) => Task.FromResult(_users.SingleOrDefault(x => x.Id == id));
+        public Task<bool> EmailExistsAsync(string email, Guid? excludingId, CancellationToken cancellationToken) => Task.FromResult(_users.Any(x => x.Email == email && (excludingId == null || x.Id != excludingId)));
         public Task<bool> ExternalIdentityIdExistsAsync(string externalIdentityId, Guid? excludingId, CancellationToken cancellationToken) => Task.FromResult(_users.Any(x => x.ExternalIdentityId == externalIdentityId && (excludingId == null || x.Id != excludingId)));
         public Task AddUserAsync(User user, CancellationToken cancellationToken) { _users.Add(user); return Task.CompletedTask; }
         public Task<List<UserOrgAssignment>> ListAssignmentsAsync(Guid userId, CancellationToken cancellationToken) => Task.FromResult(_assignments.Where(x => x.UserId == userId).ToList());
-        public Task<bool> HasOverlappingPrimaryAssignmentAsync(Guid userId, DateTime effectiveFromUtc, DateTime? effectiveToUtc, CancellationToken cancellationToken) =>
+        public Task<UserOrgAssignment?> GetAssignmentAsync(Guid userId, Guid assignmentId, CancellationToken cancellationToken) => Task.FromResult(_assignments.SingleOrDefault(x => x.UserId == userId && x.Id == assignmentId));
+        public Task<bool> HasOverlappingPrimaryAssignmentAsync(Guid userId, DateTime effectiveFromUtc, DateTime? effectiveToUtc, Guid? excludingAssignmentId, CancellationToken cancellationToken) =>
             Task.FromResult(_assignments.Any(x =>
                 x.UserId == userId
+                && (excludingAssignmentId == null || x.Id != excludingAssignmentId)
                 && x.IsPrimary
                 && x.EffectiveFromUtc < (effectiveToUtc ?? DateTime.MaxValue)
                 && (x.EffectiveToUtc ?? DateTime.MaxValue) > effectiveFromUtc));

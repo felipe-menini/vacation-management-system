@@ -15,11 +15,13 @@ public interface IOrganizationRepository
     Task<List<User>> ListUsersAsync(CancellationToken cancellationToken);
     Task<List<User>> ListUsersInOrgUnitsAsync(IReadOnlyCollection<Guid> orgUnitIds, DateTime utcNow, CancellationToken cancellationToken);
     Task<User?> GetUserAsync(Guid id, CancellationToken cancellationToken);
+    Task<bool> EmailExistsAsync(string email, Guid? excludingId, CancellationToken cancellationToken);
     Task<bool> ExternalIdentityIdExistsAsync(string externalIdentityId, Guid? excludingId, CancellationToken cancellationToken);
     Task AddUserAsync(User user, CancellationToken cancellationToken);
 
     Task<List<UserOrgAssignment>> ListAssignmentsAsync(Guid userId, CancellationToken cancellationToken);
-    Task<bool> HasOverlappingPrimaryAssignmentAsync(Guid userId, DateTime effectiveFromUtc, DateTime? effectiveToUtc, CancellationToken cancellationToken);
+    Task<UserOrgAssignment?> GetAssignmentAsync(Guid userId, Guid assignmentId, CancellationToken cancellationToken);
+    Task<bool> HasOverlappingPrimaryAssignmentAsync(Guid userId, DateTime effectiveFromUtc, DateTime? effectiveToUtc, Guid? excludingAssignmentId, CancellationToken cancellationToken);
     Task AddAssignmentAsync(UserOrgAssignment assignment, CancellationToken cancellationToken);
     Task SaveChangesAsync(CancellationToken cancellationToken);
 }
