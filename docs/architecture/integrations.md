@@ -13,6 +13,10 @@ Microsoft 365 integrations are adapters around the application. They must not le
 | Microsoft 365 Calendars | Not a source of truth; future publication target for approved absences. | No |
 | Private object storage | Attachment bytes and sensitive documents. | Yes |
 
+
+## Notification boundary
+
+Leave workflow notifications start from committed PostgreSQL outbox events, not from direct calls to Microsoft Graph, SMTP, Teams, or browser push inside the request transaction. `Licenses.Worker` polls PostgreSQL, claims work with `SKIP LOCKED`, resolves recipients through backend permissions and organizational scope, and sends through `INotificationSender`. Development uses a logging sender. Non-Development fails clearly until a real Microsoft provider is added after the customer supplies tenant/configuration details.
 ## SharePoint boundary
 
 SharePoint is a migration/historical source, not the operational source of truth. SharePoint list names, column names, content types, views, and Graph payload structures must stay inside the integration/migration layer.

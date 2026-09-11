@@ -1,6 +1,7 @@
 using Licenses.Domain.Authorization;
 using Licenses.Domain.Identity;
 using Licenses.Domain.LeaveManagement;
+using Licenses.Domain.Notifications;
 using Licenses.Domain.Organization;
 using Microsoft.EntityFrameworkCore;
 
@@ -29,6 +30,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<LeaveRequestDecision> LeaveRequestDecisions => Set<LeaveRequestDecision>();
     public DbSet<LeaveRequestCancellation> LeaveRequestCancellations => Set<LeaveRequestCancellation>();
     public DbSet<LeaveRequestRevocation> LeaveRequestRevocations => Set<LeaveRequestRevocation>();
+    public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
