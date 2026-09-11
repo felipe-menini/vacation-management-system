@@ -30,5 +30,3 @@ public interface ILeaveRequestRepository
     Task SaveChangesAsync(CancellationToken cancellationToken);
     Task CommitTransactionAsync(CancellationToken cancellationToken);
 }
-
-
