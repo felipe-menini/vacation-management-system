@@ -20,7 +20,7 @@ Source: `../reference/Arquitectura_Alcance_Sistema_Licencias.docx`.
 | Authorization | Backend-enforced Role + Organizational Scope. |
 | Leave rules | Configurable and versioned policies; no hardcoded business rules. |
 | Balances | Immutable ledger; visible balances are derived, not directly edited. |
-| Notifications | Transactional outbox + background worker. |
+| Notifications | Transactional PostgreSQL outbox for lifecycle events, processed by `Licenses.Worker` through a provider-neutral sender. |
 
 ## Logical architecture
 
@@ -33,7 +33,8 @@ flowchart LR
     Domain --> Storage["Private object storage<br/>attachments"]
     Domain --> Outbox[("Notification outbox")]
     Worker[".NET background worker"] --> Outbox
-    Worker --> M365["Microsoft 365 notifications"]
+    Worker --> Sender["Notification sender abstraction"]
+    Sender -. future .-> M365["Microsoft 365 notifications"]
     Integration["Integration layer"] --> Graph["Microsoft Graph"]
     Graph --> SP["SharePoint lists<br/>migration/history"]
     Domain --> Integration
@@ -69,7 +70,7 @@ Domain code must not depend directly on Microsoft Graph, SharePoint, Azure, Post
 | Approval Service | Build approval workflows and persist decisions. |
 | Document Service | Validate, store, authorize, and audit attachments. |
 | Integration Service | Encapsulate Microsoft Graph, SharePoint migration, and Microsoft 365 notifications. |
-| Notification Worker | Process outbox events with retries and idempotency. |
+| Notification Worker | Processes committed outbox events with PostgreSQL polling, SKIP LOCKED claiming, retries, dead-letter state, and provider-neutral delivery. |
 | Audit Service | Record security and business audit evidence with correlation IDs. |
 
 ## Architectural principles

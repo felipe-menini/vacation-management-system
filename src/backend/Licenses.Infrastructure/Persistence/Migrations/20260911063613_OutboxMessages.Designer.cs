@@ -3,6 +3,7 @@ using System;
 using Licenses.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Licenses.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260911063613_OutboxMessages")]
+    partial class OutboxMessages
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1117,10 +1120,6 @@ namespace Licenses.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at_utc");
 
-                    b.Property<DateTime?>("DeadLetteredAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("dead_lettered_at_utc");
-
                     b.Property<string>("EventType")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -1131,10 +1130,6 @@ namespace Licenses.Infrastructure.Persistence.Migrations
                         .HasMaxLength(4000)
                         .HasColumnType("character varying(4000)")
                         .HasColumnName("last_error");
-
-                    b.Property<DateTime?>("NextAttemptAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("next_attempt_at_utc");
 
                     b.Property<DateTime>("OccurredAtUtc")
                         .HasColumnType("timestamp with time zone")
@@ -1149,10 +1144,6 @@ namespace Licenses.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("processed_at_utc");
 
-                    b.Property<DateTime?>("ProcessingLeaseExpiresAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("processing_lease_expires_at_utc");
-
                     b.HasKey("Id");
 
                     b.HasIndex("OccurredAtUtc");
@@ -1161,9 +1152,6 @@ namespace Licenses.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.HasIndex("ProcessedAtUtc", "CreatedAtUtc");
-
-                    b.HasIndex("ProcessedAtUtc", "DeadLetteredAtUtc", "NextAttemptAtUtc")
-                        .HasDatabaseName("ix_outbox_messages_processing_eligibility");
 
                     b.ToTable("outbox_messages", "licenses", t =>
                         {

@@ -13,10 +13,11 @@ PostgreSQL is the future source of truth for operational data. SharePoint remain
 | Balance | Derived from immutable ledger transactions. |
 | Policy history | Versioned with effective date ranges. |
 | Migration traceability | Preserve SharePoint source identifiers through `MigrationMapping`. |
+| Notifications foundation | Persist lifecycle application events through a transactional PostgreSQL outbox. |
 
 ## Transaction boundaries
 
-Operations that affect request state, approval state, and balance must run in a single database transaction: submit, reject, final approve, resolve cancellation, revoke, manual adjustment, and migration import.
+Operations that affect request state, approval state, balance, and notification outbox messages must run in a single database transaction: submit, reject, final approve, resolve cancellation, revoke, manual adjustment, and migration import.
 
 ## Concurrency
 
@@ -79,3 +80,9 @@ Approval/rejection runs in one PostgreSQL transaction with a row-level lock on `
 EP-10 adds `licenses.leave_request_documents` for immutable leave-request document metadata. PostgreSQL stores `kind`, sanitized original filename, content type, size, opaque storage key, SHA-256, uploader, and creation timestamp only. It does not store blobs or byte arrays.
 
 The table uses conservative foreign keys to `leave_requests` and `users`, a controlled `MEDICAL_CERTIFICATE` kind constraint, positive size checks, unique `storage_key`, SHA-256 metadata, and request/uploader indexes.
+
+## Implemented outbox persistence
+
+EP-11 adds `licenses.outbox_messages` as the transactional handoff for outbound workflow notifications. Leave workflow services persist lifecycle event payloads in the same PostgreSQL transaction as the business state change, so rolled-back workflows leave no message and committed workflows can be processed later.
+
+Outbox rows store event type, simple JSON payload, occurrence/creation timestamps, idempotency correlation, and processing metadata. `EventType + CorrelationId` is unique to align with existing workflow operation IDs and prevent duplicate messages on idempotent retries. `Licenses.Worker` claims eligible rows with PostgreSQL `FOR UPDATE SKIP LOCKED`, stores processing leases, marks successful messages processed, schedules bounded exponential retry after failures, and dead-letters messages that reach the configured attempt limit. Real Microsoft delivery is deferred until tenant configuration is available and will implement the existing provider-neutral sender abstraction.

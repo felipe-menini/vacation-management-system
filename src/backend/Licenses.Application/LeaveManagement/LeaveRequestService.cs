@@ -1,9 +1,10 @@
 using Licenses.Application.Authorization;
+using Licenses.Application.Notifications;
 using Licenses.Domain.LeaveManagement;
 
 namespace Licenses.Application.LeaveManagement;
 
-public sealed class LeaveRequestService(ILeaveRequestRepository repository, ILeavePolicyRepository policyRepository, BalanceService balanceService, AuthorizationService authorization, ICurrentActor currentActor, TimeProvider timeProvider)
+public sealed class LeaveRequestService(ILeaveRequestRepository repository, ILeavePolicyRepository policyRepository, BalanceService balanceService, AuthorizationService authorization, ICurrentActor currentActor, TimeProvider timeProvider, IApplicationEventOutbox outbox)
 {
     private readonly DayCalculator _calculator = new();
 
@@ -164,7 +165,9 @@ public sealed class LeaveRequestService(ILeaveRequestRepository repository, ILea
             if (balanceAccountId is null) throw new InvalidOperationException("Balance reservation account was not persisted.");
         }
 
-        request.Submit(version.Id, calculatedDays, balanceAccountId, operationId, UtcNow(), submissionOperationId);
+        var now = UtcNow();
+        request.Submit(version.Id, calculatedDays, balanceAccountId, operationId, now, submissionOperationId);
+        await outbox.EnqueueAsync(new LeaveRequestSubmitted(request.Id, request.UserId, request.OrgUnitId, currentActor.UserId, now), submissionOperationId, cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
         return new((await ToDtosAsync([request], cancellationToken)).Single(), warnings, WasAlreadySubmitted: false);
     }
@@ -202,6 +205,7 @@ public sealed class LeaveRequestService(ILeaveRequestRepository repository, ILea
         var cancellation = LeaveRequestCancellation.Create(request.Id, actorId, reason, command.OperationId, now);
         await repository.AddCancellationAsync(cancellation, cancellationToken);
         request.RequestCancellation(now);
+        await outbox.EnqueueAsync(new LeaveCancellationRequested(request.Id, request.UserId, request.OrgUnitId, actorId, now), command.OperationId, cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
         await repository.CommitTransactionAsync(cancellationToken);
         return new((await ToDtosAsync([request], cancellationToken)).Single(), await ToCancellationDtoAsync(cancellation, cancellationToken), false);
@@ -241,7 +245,16 @@ public sealed class LeaveRequestService(ILeaveRequestRepository repository, ILea
         if (decisionKind == LeaveRequestCancellationDecision.Approve) settlementOperationId = await RefundIfConsumingAsync(request, command.OperationId, (byte)decisionKind, "Refund cancelled leave request", cancellationToken);
         var now = UtcNow();
         cancellation.Decide(decisionKind, actorId, comment, command.OperationId, settlementOperationId, now);
-        if (decisionKind == LeaveRequestCancellationDecision.Approve) request.ApproveCancellation(now); else request.RejectCancellation(now);
+        if (decisionKind == LeaveRequestCancellationDecision.Approve)
+        {
+            request.ApproveCancellation(now);
+            await outbox.EnqueueAsync(new LeaveCancellationApproved(request.Id, request.UserId, request.OrgUnitId, actorId, now), command.OperationId, cancellationToken);
+        }
+        else
+        {
+            request.RejectCancellation(now);
+            await outbox.EnqueueAsync(new LeaveCancellationRejected(request.Id, request.UserId, request.OrgUnitId, actorId, now), command.OperationId, cancellationToken);
+        }
         await repository.SaveChangesAsync(cancellationToken);
         await repository.CommitTransactionAsync(cancellationToken);
         return new((await ToDtosAsync([request], cancellationToken)).Single(), await ToCancellationDtoAsync(cancellation, cancellationToken), false);
@@ -274,6 +287,7 @@ public sealed class LeaveRequestService(ILeaveRequestRepository repository, ILea
         var revocation = LeaveRequestRevocation.Create(request.Id, actorId, reason, command.OperationId, settlementOperationId, now);
         await repository.AddRevocationAsync(revocation, cancellationToken);
         request.Revoke(now);
+        await outbox.EnqueueAsync(new LeaveRequestRevoked(request.Id, request.UserId, request.OrgUnitId, actorId, now), command.OperationId, cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
         await repository.CommitTransactionAsync(cancellationToken);
         return new((await ToDtosAsync([request], cancellationToken)).Single(), await ToRevocationDtoAsync(revocation, cancellationToken), false);
@@ -324,7 +338,16 @@ public sealed class LeaveRequestService(ILeaveRequestRepository repository, ILea
         var now = UtcNow();
         var decision = LeaveRequestDecision.Create(request.Id, decisionKind, actorId, comment, command.OperationId, settlementOperationId, now);
         await repository.AddDecisionAsync(decision, cancellationToken);
-        if (decisionKind == LeaveRequestDecisionKind.Approve) request.Approve(now); else request.Reject(now);
+        if (decisionKind == LeaveRequestDecisionKind.Approve)
+        {
+            request.Approve(now);
+            await outbox.EnqueueAsync(new LeaveRequestApproved(request.Id, request.UserId, request.OrgUnitId, actorId, now), command.OperationId, cancellationToken);
+        }
+        else
+        {
+            request.Reject(now);
+            await outbox.EnqueueAsync(new LeaveRequestRejected(request.Id, request.UserId, request.OrgUnitId, actorId, now), command.OperationId, cancellationToken);
+        }
         await repository.SaveChangesAsync(cancellationToken);
         await repository.CommitTransactionAsync(cancellationToken);
         return new((await ToDtosAsync([request], cancellationToken)).Single(), await ToDecisionDtoAsync(decision, cancellationToken), WasAlreadyApplied: false);
