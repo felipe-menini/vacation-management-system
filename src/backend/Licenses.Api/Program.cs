@@ -26,6 +26,7 @@ builder.Services.AddCors(options =>
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentActor, DevelopmentCurrentActor>();
 builder.Services.AddScoped<AuthorizationService>();
+builder.Services.AddScoped<AuthorizationAdminService>();
 builder.Services.AddHealthChecks();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddScoped<OrganizationService>();

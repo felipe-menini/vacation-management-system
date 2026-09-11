@@ -27,6 +27,22 @@ public sealed class UserOrgAssignment
     public static UserOrgAssignment Create(Guid userId, Guid orgUnitId, bool isPrimary, DateTime effectiveFromUtc, DateTime? effectiveToUtc) =>
         new(Guid.NewGuid(), userId, orgUnitId, isPrimary, effectiveFromUtc, effectiveToUtc);
 
+    public void Update(Guid orgUnitId, bool isPrimary, DateTime effectiveFromUtc, DateTime? effectiveToUtc)
+    {
+        OrgUnitId = orgUnitId == Guid.Empty ? throw new ArgumentException("Organizational unit id is required.", nameof(orgUnitId)) : orgUnitId;
+        IsPrimary = isPrimary;
+        EffectiveFromUtc = EnsureUtc(effectiveFromUtc, nameof(effectiveFromUtc));
+        EffectiveToUtc = effectiveToUtc is null ? null : EnsureUtc(effectiveToUtc.Value, nameof(effectiveToUtc));
+        if (EffectiveToUtc <= EffectiveFromUtc) throw new InvalidOperationException("Assignment end must be after its start.");
+    }
+
+    public void End(DateTime effectiveToUtc)
+    {
+        var utcEnd = EnsureUtc(effectiveToUtc, nameof(effectiveToUtc));
+        if (utcEnd <= EffectiveFromUtc) throw new InvalidOperationException("Assignment end must be after its start.");
+        EffectiveToUtc = utcEnd;
+    }
+
     private static DateTime EnsureUtc(DateTime value, string name)
     {
         if (value.Kind != DateTimeKind.Utc) throw new ArgumentException("Timestamp must be UTC.", name);

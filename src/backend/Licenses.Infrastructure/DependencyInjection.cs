@@ -50,6 +50,7 @@ public static class DependencyInjection
         services.AddScoped<IAuditWriter, EfAuditWriter>();
         services.AddScoped<IAuditEventReader, EfAuditEventReader>();
         services.AddScoped<IAuthorizationRepository, EfAuthorizationRepository>();
+        services.AddScoped<IAuthorizationAdminRepository, EfAuthorizationAdminRepository>();
         services.AddSingleton(TimeProvider.System);
 
         services.AddHealthChecks()

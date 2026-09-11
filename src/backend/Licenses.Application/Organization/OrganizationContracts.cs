@@ -9,3 +9,5 @@ public sealed record UpdateOrgUnitCommand(string Name, string Code, Guid? Parent
 public sealed record CreateUserCommand(string DisplayName, string Email, string? ExternalIdentityId);
 public sealed record UpdateUserCommand(string DisplayName, string Email, string? ExternalIdentityId, bool IsActive);
 public sealed record CreateUserOrgAssignmentCommand(Guid OrgUnitId, bool IsPrimary, DateTime EffectiveFromUtc, DateTime? EffectiveToUtc);
+public sealed record UpdateUserOrgAssignmentCommand(Guid OrgUnitId, bool IsPrimary, DateTime EffectiveFromUtc, DateTime? EffectiveToUtc);
+public sealed record EndUserOrgAssignmentCommand(DateTime EffectiveToUtc);

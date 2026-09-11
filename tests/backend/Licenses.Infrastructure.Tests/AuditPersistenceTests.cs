@@ -1,11 +1,14 @@
 using System.Reflection;
 using System.Text.Json;
 using Licenses.Application.Audit;
+using Licenses.Application.Authorization;
 using Licenses.Domain.Audit;
+using Licenses.Domain.Authorization;
 using Licenses.Domain.Identity;
 using Licenses.Domain.LeaveManagement;
 using Licenses.Domain.Organization;
 using Licenses.Infrastructure.Audit;
+using Licenses.Infrastructure.Authorization;
 using Licenses.Infrastructure.Organization;
 using Licenses.Infrastructure.LeaveManagement;
 using Licenses.Infrastructure.Persistence;
@@ -188,6 +191,33 @@ public sealed class AuditPersistenceTests
 
             Assert.Equal(0, await db.OrgUnits.CountAsync(x => x.Name == "Rollback Unit"));
             Assert.Equal(0, await db.AuditEvents.CountAsync(x => x.Action == "organization.unit.create"));
+        });
+    }
+
+    [Fact]
+    public async Task RoleScopeMutationAndAuditRollBackTogether()
+    {
+        await PostgreSqlTestDatabase.WithFreshDatabaseAsync(async db =>
+        {
+            var now = DateTime.UtcNow;
+            var actor = User.Create("Authorization Admin", $"authorization.admin.{Guid.NewGuid():N}@example.test", null, now);
+            var subject = User.Create("Authorization Subject", $"authorization.subject.{Guid.NewGuid():N}@example.test", null, now);
+            var role = Role.Create("AUTHZ_" + Guid.NewGuid().ToString("N")[..8], "Authorization Role", "Authorization role", true, now);
+            var orgUnit = OrgUnit.Create("Authorization Unit", "AUTHZ_UNIT_" + Guid.NewGuid().ToString("N")[..8], null, now);
+            await db.Users.AddRangeAsync(actor, subject);
+            await db.Roles.AddAsync(role);
+            await db.OrgUnits.AddAsync(orgUnit);
+            await db.SaveChangesAsync();
+
+            var service = new AuthorizationAdminService(new EfAuthorizationAdminRepository(db), TimeProvider.System, new EfAuditWriter(db));
+
+            await using var transaction = await db.Database.BeginTransactionAsync();
+            await service.AssignRoleScopeAsync(new(subject.Id, role.Id, orgUnit.Id, true, now.AddDays(-1), null), CancellationToken.None, actor.Id);
+            await transaction.RollbackAsync();
+            db.ChangeTracker.Clear();
+
+            Assert.Equal(0, await db.RoleScopeAssignments.CountAsync());
+            Assert.Equal(0, await db.AuditEvents.CountAsync(x => x.Action == "authorization.role_scope.assign"));
         });
     }
 

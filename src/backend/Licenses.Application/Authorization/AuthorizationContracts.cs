@@ -29,6 +29,7 @@ public static class PermissionCodes
     public const string LeaveDocumentsUploadSelf = "leave.documents.upload.self";
     public const string LeaveDocumentsRead = "leave.documents.read";
     public const string AuditEventsRead = "audit.events.read";
+    public const string AuthorizationRoleScopesManage = "authorization.role_scopes.manage";
 }
 
 public sealed record CurrentActor(Guid UserId);
