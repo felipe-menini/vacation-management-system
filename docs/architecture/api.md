@@ -78,3 +78,13 @@ EP-09 adds explicit endpoints for post-approval lifecycle and manual creation:
 - `POST /api/users/{userId}/leave-requests`
 
 These commands use operation ids for idempotency. They do not accept caller-supplied status, calculated days, policy version, balance account, reservation id, or settlement operation id.
+
+## Implemented EP-10 document endpoints
+
+EP-10 adds private leave-request document endpoints:
+
+- `GET /api/leave-requests/{id}/documents`
+- `POST /api/leave-requests/{id}/documents`
+- `GET /api/leave-request-documents/{documentId}/content`
+
+Uploads use `multipart/form-data` with a `file` part. Content is streamed only by the backend after authorization; metadata responses never expose `StorageKey` or direct storage URLs.

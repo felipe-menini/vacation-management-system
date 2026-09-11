@@ -367,6 +367,7 @@ public sealed class LeaveRequestService(ILeaveRequestRepository repository, ILea
         var decisions = (await repository.ListDecisionsByRequestIdsAsync(list.Select(x => x.Id).ToList(), cancellationToken)).ToDictionary(x => x.LeaveRequestId);
         var cancellations = (await repository.ListCancellationsByRequestIdsAsync(list.Select(x => x.Id).ToList(), cancellationToken)).ToDictionary(x => x.LeaveRequestId);
         var revocations = (await repository.ListRevocationsByRequestIdsAsync(list.Select(x => x.Id).ToList(), cancellationToken)).ToDictionary(x => x.LeaveRequestId);
+        var documents = (await repository.ListDocumentsByRequestIdsAsync(list.Select(x => x.Id).ToList(), cancellationToken)).GroupBy(x => x.LeaveRequestId).ToDictionary(x => x.Key, x => x.ToList());
         var result = new List<LeaveRequestDto>();
         foreach (var request in list)
         {
@@ -374,11 +375,30 @@ public sealed class LeaveRequestService(ILeaveRequestRepository repository, ILea
             var unit = await repository.GetOrgUnitAsync(request.OrgUnitId, cancellationToken);
             var type = await repository.GetLeaveTypeAsync(request.LeaveTypeId, cancellationToken);
             var creator = await repository.GetUserAsync(request.CreatedByUserId, cancellationToken);
-            result.Add(new(request.Id, request.UserId, user?.DisplayName, request.OrgUnitId, unit?.Code, unit?.Name, request.LeaveTypeId, type?.Code, type?.Name, request.LeavePolicyVersionId, request.StartDate, request.EndDate, ToDayPortion(request.DayPortion), request.CalculatedDays, ToStatus(request.Status), request.Comment, request.BalanceAccountId, request.BalanceReservationOperationId, request.SubmissionOperationId, request.CreatedByUserId, creator?.DisplayName, request.CreatedAtUtc, request.UpdatedAtUtc, request.SubmittedAtUtc, request.DecidedAtUtc, request.CancellationRequestedAtUtc, request.CancellationDecidedAtUtc, request.RevokedAtUtc, decisions.TryGetValue(request.Id, out var decision) ? await ToDecisionDtoAsync(decision, cancellationToken) : null, cancellations.TryGetValue(request.Id, out var cancellation) ? await ToCancellationDtoAsync(cancellation, cancellationToken) : null, revocations.TryGetValue(request.Id, out var revocation) ? await ToRevocationDtoAsync(revocation, cancellationToken) : null));
+            result.Add(new(request.Id, request.UserId, user?.DisplayName, request.OrgUnitId, unit?.Code, unit?.Name, request.LeaveTypeId, type?.Code, type?.Name, request.LeavePolicyVersionId, request.StartDate, request.EndDate, ToDayPortion(request.DayPortion), request.CalculatedDays, ToStatus(request.Status), request.Comment, request.BalanceAccountId, request.BalanceReservationOperationId, request.SubmissionOperationId, request.CreatedByUserId, creator?.DisplayName, request.CreatedAtUtc, request.UpdatedAtUtc, request.SubmittedAtUtc, request.DecidedAtUtc, request.CancellationRequestedAtUtc, request.CancellationDecidedAtUtc, request.RevokedAtUtc, decisions.TryGetValue(request.Id, out var decision) ? await ToDecisionDtoAsync(decision, cancellationToken) : null, cancellations.TryGetValue(request.Id, out var cancellation) ? await ToCancellationDtoAsync(cancellation, cancellationToken) : null, revocations.TryGetValue(request.Id, out var revocation) ? await ToRevocationDtoAsync(revocation, cancellationToken) : null, await DocumentsForRequestAsync(request, documents, cancellationToken)) );
         }
         return result;
     }
 
+    private async Task<IReadOnlyList<LeaveRequestDocumentDto>> DocumentsForRequestAsync(LeaveRequest request, IReadOnlyDictionary<Guid, List<LeaveRequestDocument>> documents, CancellationToken cancellationToken)
+    {
+        if (!documents.TryGetValue(request.Id, out var requestDocuments)) return [];
+        var actorId = RequireActor();
+        var allowed = request.UserId == actorId
+            ? await authorization.CanUserPerformGlobalAsync(actorId, PermissionCodes.LeaveDocumentsReadSelf, cancellationToken)
+            : await authorization.CanUserPerformAsync(actorId, PermissionCodes.LeaveDocumentsRead, request.OrgUnitId, cancellationToken);
+        return allowed ? await ToDocumentDtosAsync(requestDocuments, cancellationToken) : [];
+    }
+    private async Task<IReadOnlyList<LeaveRequestDocumentDto>> ToDocumentDtosAsync(IEnumerable<LeaveRequestDocument> documents, CancellationToken cancellationToken)
+    {
+        var result = new List<LeaveRequestDocumentDto>();
+        foreach (var document in documents)
+        {
+            var uploader = await repository.GetUserAsync(document.UploadedByUserId, cancellationToken);
+            result.Add(new(document.Id, document.LeaveRequestId, LeaveRequestDocumentService.ToKind(document.Kind), document.OriginalFileName, document.ContentType, document.SizeBytes, document.Sha256, document.UploadedByUserId, uploader?.DisplayName, document.CreatedAtUtc));
+        }
+        return result;
+    }
     private Guid RequireActor() => currentActor.UserId ?? throw new UnauthorizedAccessException("Actor is required.");
     private DateTime UtcNow() => timeProvider.GetUtcNow().UtcDateTime;
     private async Task<bool> CanReadDecisionRequestAsync(Guid actorId, LeaveRequest request, CancellationToken cancellationToken) =>
@@ -503,5 +523,3 @@ public sealed class LeaveRequestService(ILeaveRequestRepository repository, ILea
         return new Guid(bytes);
     }
 }
-
-

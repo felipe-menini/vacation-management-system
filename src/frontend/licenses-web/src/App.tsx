@@ -20,7 +20,8 @@ type BalanceLedgerEntry = { id: string; operationId: string; type: string; avail
 type LeaveRequestDecision = { id: string; leaveRequestId: string; decision: string; decidedByUserId: string; decidedByUserDisplayName: string | null; comment: string | null; operationId: string; balanceSettlementOperationId: string | null; createdAtUtc: string };
 type LeaveRequestCancellation = { id: string; leaveRequestId: string; requestedByUserId: string; requestedByUserDisplayName: string | null; reason: string; operationId: string; requestedAtUtc: string; decision: string | null; decidedByUserId: string | null; decidedByUserDisplayName: string | null; decisionComment: string | null; decisionOperationId: string | null; balanceSettlementOperationId: string | null; decidedAtUtc: string | null };
 type LeaveRequestRevocation = { id: string; leaveRequestId: string; revokedByUserId: string; revokedByUserDisplayName: string | null; reason: string; operationId: string; balanceSettlementOperationId: string | null; createdAtUtc: string };
-type LeaveRequest = { id: string; userId: string; userDisplayName: string | null; orgUnitId: string; orgUnitCode: string | null; orgUnitName: string | null; leaveTypeId: string; leaveTypeCode: string | null; leaveTypeName: string | null; leavePolicyVersionId: string | null; startDate: string; endDate: string; dayPortion: string; calculatedDays: number | null; status: string; comment: string | null; balanceAccountId: string | null; balanceReservationOperationId: string | null; submissionOperationId: string | null; createdByUserId: string; createdByUserDisplayName: string | null; createdAtUtc: string; submittedAtUtc: string | null; decidedAtUtc: string | null; cancellationRequestedAtUtc: string | null; cancellationDecidedAtUtc: string | null; revokedAtUtc: string | null; decision: LeaveRequestDecision | null; cancellation: LeaveRequestCancellation | null; revocation: LeaveRequestRevocation | null };
+type LeaveRequestDocument = { id: string; leaveRequestId: string; kind: string; originalFileName: string; contentType: string; sizeBytes: number; sha256: string; uploadedByUserId: string; uploadedByUserDisplayName: string | null; createdAtUtc: string };
+type LeaveRequest = { id: string; userId: string; userDisplayName: string | null; orgUnitId: string; orgUnitCode: string | null; orgUnitName: string | null; leaveTypeId: string; leaveTypeCode: string | null; leaveTypeName: string | null; leavePolicyVersionId: string | null; startDate: string; endDate: string; dayPortion: string; calculatedDays: number | null; status: string; comment: string | null; balanceAccountId: string | null; balanceReservationOperationId: string | null; submissionOperationId: string | null; createdByUserId: string; createdByUserDisplayName: string | null; createdAtUtc: string; submittedAtUtc: string | null; decidedAtUtc: string | null; cancellationRequestedAtUtc: string | null; cancellationDecidedAtUtc: string | null; revokedAtUtc: string | null; decision: LeaveRequestDecision | null; cancellation: LeaveRequestCancellation | null; revocation: LeaveRequestRevocation | null; documents: LeaveRequestDocument[] };
 type SubmitLeaveRequestResult = { request: LeaveRequest; warnings: string[]; wasAlreadySubmitted: boolean };
 
 type StatusCardProps = { label: string; status: HealthStatus };
@@ -50,6 +51,24 @@ async function fetchJson<T>(path: string, actorId: string | null = null): Promis
   const response = await fetch(`${endpointPrefix}${path}`, { headers: developmentHeaders(actorId) });
   if (!response.ok) throw new Error(`Request failed: ${response.status}`);
   return (await response.json()) as T;
+}
+
+async function sendMultipart<T>(path: string, body: FormData, actorId: string | null): Promise<T> {
+  const response = await fetch(`${endpointPrefix}${path}`, { method: 'POST', headers: developmentHeaders(actorId), body });
+  if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+  return (await response.json()) as T;
+}
+
+async function downloadDocument(documentId: string, fileName: string, actorId: string | null): Promise<void> {
+  const response = await fetch(`${endpointPrefix}/leave-request-documents/${documentId}/content`, { headers: developmentHeaders(actorId) });
+  if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 async function sendJson<T>(path: string, method: 'POST' | 'PUT', body: unknown, actorId: string | null): Promise<T> {
@@ -139,6 +158,7 @@ export function App() {
   const [processingDecisionId, setProcessingDecisionId] = useState<string | null>(null);
   const [requestMessage, setRequestMessage] = useState<string | null>(null);
   const [isRequestSubmitting, setIsRequestSubmitting] = useState(false);
+  const [uploadingDocumentRequestId, setUploadingDocumentRequestId] = useState<string | null>(null);
 
   const selectedActor = useMemo(() => actors.find((actor) => actor.id === selectedActorId) ?? null, [actors, selectedActorId]);
 
@@ -566,6 +586,38 @@ export function App() {
   }
 
 
+
+  async function uploadMedicalCertificate(event: FormEvent<HTMLFormElement>, requestId: string) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const file = data.get('file');
+    if (!(file instanceof File) || file.size === 0) {
+      setRequestMessage('Choose a PDF, JPEG, or PNG file to upload.');
+      return;
+    }
+    try {
+      setUploadingDocumentRequestId(requestId);
+      const payload = new FormData();
+      payload.append('file', file);
+      await sendMultipart<LeaveRequestDocument>(`/leave-requests/${requestId}/documents`, payload, selectedActorId);
+      event.currentTarget.reset();
+      await loadLeaveRequests(selectedActorId);
+      setRequestMessage('Medical certificate uploaded.');
+    } catch (error) {
+      setRequestMessage(error instanceof Error ? error.message : 'Unable to upload medical certificate.');
+    } finally {
+      setUploadingDocumentRequestId(null);
+    }
+  }
+
+  async function downloadLeaveRequestDocument(document: LeaveRequestDocument) {
+    try {
+      await downloadDocument(document.id, document.originalFileName, selectedActorId);
+    } catch (error) {
+      setRequestMessage(error instanceof Error ? error.message : 'Unable to download document.');
+    }
+  }
+
   async function createLeaveRequest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
@@ -832,6 +884,20 @@ export function App() {
             {request.decision ? <span>Decision: {request.decision.decision} by {request.decision.decidedByUserDisplayName ?? request.decision.decidedByUserId} on {new Date(request.decision.createdAtUtc).toLocaleString()}{request.decision.comment ? ` · ${request.decision.comment}` : ''}</span> : null}
             {request.cancellation ? <span>Cancellation: {request.cancellation.reason} · {request.cancellation.decision ? `${request.cancellation.decision}${request.cancellation.decisionComment ? ` · ${request.cancellation.decisionComment}` : ''}` : 'pending'}</span> : null}
             {request.revocation ? <span>Revoked: {request.revocation.reason} by {request.revocation.revokedByUserDisplayName ?? request.revocation.revokedByUserId}</span> : null}
+
+            <div className="document-list">
+              <strong>Documents</strong>
+              {request.documents.length === 0 ? <span className="muted">No documents attached.</span> : request.documents.map((document) => (
+                <button type="button" className="catalog-row" key={document.id} onClick={() => void downloadLeaveRequestDocument(document)}>
+                  <span>{document.kind}</span><span>{document.originalFileName}</span><span>{Math.ceil(document.sizeBytes / 1024)} KB</span>
+                </button>
+              ))}
+            </div>
+            <form className="catalog-form inline-form" onSubmit={(event) => uploadMedicalCertificate(event, request.id)}>
+              <input name="file" type="file" accept="application/pdf,image/jpeg,image/png" required />
+              <button type="submit" disabled={uploadingDocumentRequestId === request.id}>Upload medical certificate</button>
+            </form>
+
             {request.status === 'DRAFT' ? <details><summary>Edit draft</summary><form className="catalog-form inline-form" onSubmit={(event) => updateLeaveRequest(event, request.id)}>
               <select name="leaveTypeId" required defaultValue={request.leaveTypeId}>{leaveTypes.map((type) => <option key={type.id} value={type.id}>{type.code}</option>)}</select>
               <select name="orgUnitId" required defaultValue={request.orgUnitId}>{flattenOrgUnits(orgTree).map((unit) => <option key={unit.id} value={unit.id}>{unit.code}</option>)}</select>
@@ -880,7 +946,7 @@ export function App() {
             </div> : <p className="muted">Own request: cancellation decision controls hidden.</p>}
           </div>)}
         </div></article>
-        {scopedRequests.length > 0 ? <article className="panel-card"><h3>Scoped request inspector</h3><div className="catalog-list">{scopedRequests.map((request) => <div className="version-row" key={request.id}><span>{request.userDisplayName ?? request.userId}</span><span>{request.leaveTypeCode}</span><span>{request.orgUnitCode}</span><span>{request.startDate} → {request.endDate}</span><span>{request.status}</span>{request.decision ? <span>{request.decision.decision} · {request.decision.comment ?? 'No decision comment'}</span> : null}{request.cancellation ? <span>Cancellation: {request.cancellation.reason}</span> : null}{request.revocation ? <span>Revocation: {request.revocation.reason}</span> : null}{request.status === 'APPROVED' && request.userId !== selectedActorId ? <form className="catalog-form inline-form" onSubmit={(event) => revokeLeaveRequest(event, request.id)}><input name="reason" placeholder="Revocation reason" required /><button type="submit" disabled={processingDecisionId === request.id}>Revoke</button></form> : null}</div>)}</div></article> : null}
+        {scopedRequests.length > 0 ? <article className="panel-card"><h3>Scoped request inspector</h3><div className="catalog-list">{scopedRequests.map((request) => <div className="version-row" key={request.id}><span>{request.userDisplayName ?? request.userId}</span><span>{request.leaveTypeCode}</span><span>{request.orgUnitCode}</span><span>{request.startDate} → {request.endDate}</span><span>{request.status}</span>{request.decision ? <span>{request.decision.decision} · {request.decision.comment ?? 'No decision comment'}</span> : null}{request.cancellation ? <span>Cancellation: {request.cancellation.reason}</span> : null}{request.revocation ? <span>Revocation: {request.revocation.reason}</span> : null}{request.documents.length > 0 ? <span>Documents: {request.documents.map((document) => <button type="button" key={document.id} onClick={() => void downloadLeaveRequestDocument(document)}>{document.originalFileName}</button>)}</span> : <span className="muted">No documents</span>}{request.status === 'APPROVED' && request.userId !== selectedActorId ? <form className="catalog-form inline-form" onSubmit={(event) => revokeLeaveRequest(event, request.id)}><input name="reason" placeholder="Revocation reason" required /><button type="submit" disabled={processingDecisionId === request.id}>Revoke</button></form> : null}</div>)}</div></article> : null}
       </section>
 
       <section className="admin-panel" aria-label="Balance ledger">

@@ -174,6 +174,7 @@ public sealed class LeaveRequestApprovalServiceTests
         private readonly List<LeaveRequestDecision> _decisions = [];
         private readonly List<LeaveRequestCancellation> _cancellations = [];
         private readonly List<LeaveRequestRevocation> _revocations = [];
+        private readonly List<LeaveRequestDocument> _documents = [];
         private readonly Guid _balanceAccountId = Guid.NewGuid();
         public Task<IReadOnlyList<LeaveRequest>> ListByUserAsync(Guid userId, CancellationToken ct) => Task.FromResult<IReadOnlyList<LeaveRequest>>(_requests.Where(x => x.UserId == userId).ToList());
         public Task<IReadOnlyList<LeaveRequest>> ListByUsersAsync(IReadOnlyCollection<Guid> ids, CancellationToken ct) => Task.FromResult<IReadOnlyList<LeaveRequest>>(_requests.Where(x => ids.Contains(x.UserId)).ToList());
@@ -182,6 +183,10 @@ public sealed class LeaveRequestApprovalServiceTests
         public Task<LeaveRequest?> GetAsync(Guid id, bool tracking, CancellationToken ct) => Task.FromResult(_requests.SingleOrDefault(x => x.Id == id));
         public Task<LeaveRequest?> GetForUpdateAsync(Guid id, CancellationToken ct) => GetAsync(id, true, ct);
         public Task<LeaveRequest?> GetBySubmissionOperationIdAsync(Guid operationId, bool tracking, CancellationToken ct) => Task.FromResult(_requests.SingleOrDefault(x => x.SubmissionOperationId == operationId));
+        public Task<LeaveRequestDocument?> GetDocumentAsync(Guid id, bool tracking, CancellationToken ct) => Task.FromResult(_documents.SingleOrDefault(x => x.Id == id));
+        public Task<IReadOnlyList<LeaveRequestDocument>> ListDocumentsByRequestIdAsync(Guid requestId, CancellationToken ct) => Task.FromResult<IReadOnlyList<LeaveRequestDocument>>(_documents.Where(x => x.LeaveRequestId == requestId).ToList());
+        public Task<IReadOnlyList<LeaveRequestDocument>> ListDocumentsByRequestIdsAsync(IReadOnlyCollection<Guid> ids, CancellationToken ct) => Task.FromResult<IReadOnlyList<LeaveRequestDocument>>(_documents.Where(x => ids.Contains(x.LeaveRequestId)).ToList());
+        public Task AddDocumentAsync(LeaveRequestDocument document, CancellationToken ct) { _documents.Add(document); return Task.CompletedTask; }
         public Task<LeaveRequestDecision?> GetDecisionByOperationIdAsync(Guid operationId, CancellationToken ct) => Task.FromResult(_decisions.SingleOrDefault(x => x.OperationId == operationId));
         public Task<LeaveRequestDecision?> GetDecisionByRequestIdAsync(Guid requestId, CancellationToken ct) => Task.FromResult(_decisions.SingleOrDefault(x => x.LeaveRequestId == requestId));
         public Task<IReadOnlyList<LeaveRequestDecision>> ListDecisionsByRequestIdsAsync(IReadOnlyCollection<Guid> ids, CancellationToken ct) => Task.FromResult<IReadOnlyList<LeaveRequestDecision>>(_decisions.Where(x => ids.Contains(x.LeaveRequestId)).ToList());

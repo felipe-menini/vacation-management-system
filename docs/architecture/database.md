@@ -73,3 +73,9 @@ EP-07 adds `licenses.leave_requests`. Business dates use PostgreSQL `date`; life
 EP-08 adds `licenses.leave_request_decisions` and `leave_requests.decided_at_utc`. Decision rows are append-only business history with one final decision per request, unique command `operation_id`, controlled `APPROVE` / `REJECT` values, required rejection comments, conservative foreign keys, and an immutability trigger rejecting direct `UPDATE`/`DELETE`.
 
 Approval/rejection runs in one PostgreSQL transaction with a row-level lock on `leave_requests`, decision insertion, final status update, and optional balance settlement ledger entry.
+
+## Implemented document metadata persistence
+
+EP-10 adds `licenses.leave_request_documents` for immutable leave-request document metadata. PostgreSQL stores `kind`, sanitized original filename, content type, size, opaque storage key, SHA-256, uploader, and creation timestamp only. It does not store blobs or byte arrays.
+
+The table uses conservative foreign keys to `leave_requests` and `users`, a controlled `MEDICAL_CERTIFICATE` kind constraint, positive size checks, unique `storage_key`, SHA-256 metadata, and request/uploader indexes.

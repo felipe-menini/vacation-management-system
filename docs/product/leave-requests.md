@@ -59,3 +59,9 @@ EP-09 allows authorized actors to create a leave request for another employee in
 Employees can create, edit, submit, list, read, and request cancellation of their own requests. Supervisor, Manager, and HR may read, decide, resolve cancellations, revoke, and create requests for others inside organizational scope when granted the corresponding permissions. Technical administrators receive no automatic business request permission.
 
 MinimumNoticeDays validation remains intentionally deferred until company timezone and inclusive/exclusive notice semantics are explicitly decided.
+
+## Private medical certificates
+
+EP-10 supports optional `MEDICAL_CERTIFICATE` attachments on leave requests. Documents remain associated with the request across APPROVED, REJECTED, CANCELLED, and REVOKED states. Uploading a document does not change status, recalculate days, re-resolve policy, mutate balances, or alter approval/cancellation history.
+
+Supported uploads are PDF, JPEG, and PNG up to the configured maximum size, with a Development default of 10 MB. The backend validates file extension, declared content type where detectable, magic bytes, non-empty content, and maximum size. OCR, antivirus scanning, previews, retention/deletion policy, and policy-required-document enforcement are deferred.

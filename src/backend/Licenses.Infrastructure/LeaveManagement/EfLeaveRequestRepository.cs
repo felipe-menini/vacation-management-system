@@ -53,6 +53,18 @@ public sealed class EfLeaveRequestRepository(ApplicationDbContext dbContext) : I
         return query.FirstOrDefaultAsync(x => x.SubmissionOperationId == operationId, cancellationToken);
     }
 
+    public Task<LeaveRequestDocument?> GetDocumentAsync(Guid id, bool tracking, CancellationToken cancellationToken)
+    {
+        var query = tracking ? dbContext.LeaveRequestDocuments : dbContext.LeaveRequestDocuments.AsNoTracking();
+        return query.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+    }
+
+    public Task<IReadOnlyList<LeaveRequestDocument>> ListDocumentsByRequestIdAsync(Guid requestId, CancellationToken cancellationToken) =>
+        dbContext.LeaveRequestDocuments.AsNoTracking().Where(x => x.LeaveRequestId == requestId).OrderByDescending(x => x.CreatedAtUtc).ToListAsync(cancellationToken).ContinueWith(t => (IReadOnlyList<LeaveRequestDocument>)t.Result, cancellationToken);
+
+    public Task<IReadOnlyList<LeaveRequestDocument>> ListDocumentsByRequestIdsAsync(IReadOnlyCollection<Guid> requestIds, CancellationToken cancellationToken) =>
+        dbContext.LeaveRequestDocuments.AsNoTracking().Where(x => requestIds.Contains(x.LeaveRequestId)).OrderByDescending(x => x.CreatedAtUtc).ToListAsync(cancellationToken).ContinueWith(t => (IReadOnlyList<LeaveRequestDocument>)t.Result, cancellationToken);
+
     public Task<LeaveRequestDecision?> GetDecisionByOperationIdAsync(Guid operationId, CancellationToken cancellationToken) =>
         dbContext.LeaveRequestDecisions.AsNoTracking().FirstOrDefaultAsync(x => x.OperationId == operationId, cancellationToken);
 
@@ -90,6 +102,7 @@ public sealed class EfLeaveRequestRepository(ApplicationDbContext dbContext) : I
             .ToListAsync(cancellationToken).ContinueWith(t => (IReadOnlyList<LeaveRequestRevocation>)t.Result, cancellationToken);
 
     public Task AddAsync(LeaveRequest request, CancellationToken cancellationToken) => dbContext.LeaveRequests.AddAsync(request, cancellationToken).AsTask();
+    public Task AddDocumentAsync(LeaveRequestDocument document, CancellationToken cancellationToken) => dbContext.LeaveRequestDocuments.AddAsync(document, cancellationToken).AsTask();
     public Task AddDecisionAsync(LeaveRequestDecision decision, CancellationToken cancellationToken) => dbContext.LeaveRequestDecisions.AddAsync(decision, cancellationToken).AsTask();
     public Task AddCancellationAsync(LeaveRequestCancellation cancellation, CancellationToken cancellationToken) => dbContext.LeaveRequestCancellations.AddAsync(cancellation, cancellationToken).AsTask();
     public Task AddRevocationAsync(LeaveRequestRevocation revocation, CancellationToken cancellationToken) => dbContext.LeaveRequestRevocations.AddAsync(revocation, cancellationToken).AsTask();
