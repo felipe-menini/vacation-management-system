@@ -77,3 +77,7 @@ EP-04 stores day count mode, half-day allowance, notice days/mode, maximum reque
 ## Implemented EP-05 working-calendar slice
 
 EP-05 adds reusable day calculation for inclusive date ranges. `BUSINESS_DAYS` uses the selected `WorkingCalendar`; `CALENDAR_DAYS` does not require a calendar. LeaveRequest creation, notice enforcement, AM/PM half-day semantics, and request-specific date validation remain future work.
+
+## Implemented EP-07 request usage
+
+Leave requests now resolve the applicable published policy version at submission using the request `StartDate`. That exact version is frozen for the entire request. `MinimumNoticeDays` remains configured on policy versions but is not enforced until company timezone and inclusive/exclusive notice semantics are decided.

@@ -17,9 +17,10 @@ public static class PermissionCodes
     public const string LeaveBalancesReadSelf = "leave.balances.read.self";
     public const string LeaveBalancesRead = "leave.balances.read";
     public const string LeaveBalancesManage = "leave.balances.manage";
+    public const string LeaveRequestsReadSelf = "leave.requests.read.self";
+    public const string LeaveRequestsCreateSelf = "leave.requests.create.self";
+    public const string LeaveRequestsRead = "leave.requests.read";
 }
 
 public sealed record CurrentActor(Guid UserId);
 public sealed record DevelopmentActorDto(Guid Id, string DisplayName, string Email, string? PrimaryOrgUnitName);
-
-

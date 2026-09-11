@@ -40,3 +40,7 @@ Employees can read their own balances. Supervisor/manager/HR reads are constrain
 Public administrative APIs expose only `GRANT`, `ADJUSTMENT`, and `EXPIRE`. Future LeaveRequest workflow will use `RESERVE`, `RELEASE`, `CONSUME`, and `REFUND`; EP-06 does not implement LeaveRequest.
 
 Inactive buckets do not invalidate history. New grants/reserves require active buckets, while settlement/correction operations on existing accounts remain available to preserve accounting integrity.
+
+## Implemented EP-07 request reservation
+
+Submitted consuming leave requests reserve the frozen calculated quantity through the existing `RESERVE` ledger operation. The request stores the reservation operation id so retries and future approval/rejection settlement use the same accounting link. Future APPROVE will use `CONSUME`; future REJECT will use `RELEASE`.

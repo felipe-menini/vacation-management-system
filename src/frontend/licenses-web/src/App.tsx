@@ -17,6 +17,8 @@ type WorkingCalendar = { id: string; code: string; name: string; description: st
 type DayCalculationResult = { startDate: string; endDate: string; dayCountMode: string; workingCalendarId: string | null; calculatedDays: number; details: { date: string; isCounted: boolean }[] };
 type BalanceSnapshot = { userId: string; balanceBucketId: string; balanceBucketCode: string; balanceBucketName: string; unit: string; available: number; reserved: number };
 type BalanceLedgerEntry = { id: string; operationId: string; type: string; availableDelta: number; reservedDelta: number; reason: string; createdByUserId: string | null; createdByUserName: string | null; createdAtUtc: string };
+type LeaveRequest = { id: string; userId: string; userDisplayName: string | null; orgUnitId: string; orgUnitCode: string | null; orgUnitName: string | null; leaveTypeId: string; leaveTypeCode: string | null; leaveTypeName: string | null; leavePolicyVersionId: string | null; startDate: string; endDate: string; dayPortion: string; calculatedDays: number | null; status: string; comment: string | null; createdAtUtc: string; submittedAtUtc: string | null };
+type SubmitLeaveRequestResult = { request: LeaveRequest; warnings: string[]; wasAlreadySubmitted: boolean };
 
 type StatusCardProps = { label: string; status: HealthStatus };
 type CatalogKind = 'leave-types' | 'balance-buckets';
@@ -127,6 +129,10 @@ export function App() {
   const [ledgerEntries, setLedgerEntries] = useState<BalanceLedgerEntry[]>([]);
   const [balanceMessage, setBalanceMessage] = useState<string | null>(null);
   const [isBalanceSubmitting, setIsBalanceSubmitting] = useState(false);
+  const [myRequests, setMyRequests] = useState<LeaveRequest[]>([]);
+  const [scopedRequests, setScopedRequests] = useState<LeaveRequest[]>([]);
+  const [requestMessage, setRequestMessage] = useState<string | null>(null);
+  const [isRequestSubmitting, setIsRequestSubmitting] = useState(false);
 
   const selectedActor = useMemo(() => actors.find((actor) => actor.id === selectedActorId) ?? null, [actors, selectedActorId]);
 
@@ -152,6 +158,15 @@ export function App() {
 
   async function loadMyBalances(actorId: string | null) {
     setMyBalances(await fetchJson<BalanceSnapshot[]>('/balances/me', actorId));
+  }
+
+  async function loadLeaveRequests(actorId: string | null) {
+    setMyRequests(await fetchJson<LeaveRequest[]>('/leave-requests/me', actorId));
+    try {
+      setScopedRequests(await fetchJson<LeaveRequest[]>('/leave-requests/scoped', actorId));
+    } catch {
+      setScopedRequests([]);
+    }
   }
 
   const loadUserBalances = useCallback(async (userId: string, actorId: string | null) => {
@@ -270,6 +285,7 @@ export function App() {
     void (async () => {
       try {
         await loadMyBalances(selectedActorId);
+        await loadLeaveRequests(selectedActorId);
         if (selectedBalanceUserId) await loadUserBalances(selectedBalanceUserId, selectedActorId);
         if (isMounted) setBalanceMessage(null);
       } catch (error) {
@@ -278,6 +294,8 @@ export function App() {
           setSelectedUserBalances([]);
           setLedgerEntries([]);
           setBalanceMessage(error instanceof Error ? error.message : 'Unable to load balances.');
+          setMyRequests([]);
+          setScopedRequests([]);
         }
       }
     })();
@@ -529,6 +547,39 @@ export function App() {
     }
   }
 
+
+  async function createLeaveRequest(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    try {
+      await sendJson<LeaveRequest>('/leave-requests', 'POST', { orgUnitId: data.get('orgUnitId'), leaveTypeId: data.get('leaveTypeId'), startDate: data.get('startDate'), endDate: data.get('endDate'), dayPortion: data.get('dayPortion'), comment: data.get('comment') || null }, selectedActorId);
+      event.currentTarget.reset();
+      await loadLeaveRequests(selectedActorId);
+      setRequestMessage('Draft request saved.');
+    } catch (error) { setRequestMessage(error instanceof Error ? error.message : 'Unable to save leave request.'); }
+  }
+
+  async function updateLeaveRequest(event: FormEvent<HTMLFormElement>, requestId: string) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    try {
+      await sendJson<LeaveRequest>(`/leave-requests/${requestId}`, 'PUT', { orgUnitId: data.get('orgUnitId'), leaveTypeId: data.get('leaveTypeId'), startDate: data.get('startDate'), endDate: data.get('endDate'), dayPortion: data.get('dayPortion'), comment: data.get('comment') || null }, selectedActorId);
+      await loadLeaveRequests(selectedActorId);
+      setRequestMessage('Draft request updated.');
+    } catch (error) { setRequestMessage(error instanceof Error ? error.message : 'Unable to update leave request.'); }
+  }
+
+  async function submitLeaveRequest(requestId: string) {
+    setIsRequestSubmitting(true);
+    try {
+      const result = await sendJson<SubmitLeaveRequestResult>(`/leave-requests/${requestId}/submit`, 'POST', {}, selectedActorId);
+      await loadLeaveRequests(selectedActorId);
+      await loadMyBalances(selectedActorId);
+      setRequestMessage(`Submitted: ${result.request.calculatedDays ?? '-'} days${result.warnings.length ? ` · ${result.warnings.join(' · ')}` : ''}`);
+    } catch (error) { setRequestMessage(error instanceof Error ? error.message : 'Unable to submit leave request.'); }
+    finally { setIsRequestSubmitting(false); }
+  }
+
   return (
     <main className="page-shell">
       <section className="hero">
@@ -648,6 +699,46 @@ export function App() {
           <button type="submit">Calculate</button>
           {dayCalculation ? <p className="muted">Calculated days: <strong>{dayCalculation.calculatedDays}</strong></p> : null}
         </form>
+      </section>
+
+
+
+      <section className="admin-panel" aria-label="Leave requests">
+        <div>
+          <p className="eyebrow">Leave requests</p>
+          <h2>My requests</h2>
+          <p className="muted">Drafts have no ledger side effects. Submission freezes policy version and calculated quantity.</p>
+          {requestMessage ? <p className={requestMessage.includes('failed') || requestMessage.includes('403') || requestMessage.includes('401') ? 'error' : 'muted'}>{requestMessage}</p> : null}
+        </div>
+        <form className="panel-card catalog-form" onSubmit={createLeaveRequest}>
+          <h3>Create draft</h3>
+          <select name="leaveTypeId" required><option value="">Select leave type</option>{leaveTypes.filter((type) => type.isActive).map((type) => <option key={type.id} value={type.id}>{type.code} - {type.name}</option>)}</select>
+          <select name="orgUnitId" required><option value="">Select org unit</option>{flattenOrgUnits(orgTree).filter((unit) => unit.isActive).map((unit) => <option key={unit.id} value={unit.id}>{unit.code} - {unit.name}</option>)}</select>
+          <input name="startDate" type="date" required />
+          <input name="endDate" type="date" required />
+          <select name="dayPortion" defaultValue="FULL_DAY"><option>FULL_DAY</option><option>HALF_DAY</option></select>
+          <input name="comment" placeholder="Comment" />
+          <button type="submit">Create draft</button>
+        </form>
+        <article className="panel-card"><h3>My requests</h3>{myRequests.length === 0 ? <p className="muted">No leave requests yet.</p> : null}<div className="catalog-list">
+          {myRequests.map((request) => <div className="policy-card" key={request.id}>
+            <strong>{request.leaveTypeCode ?? request.leaveTypeId} · {request.status}</strong>
+            <span>{request.orgUnitCode ?? request.orgUnitId} · {request.startDate} → {request.endDate} · {request.dayPortion}</span>
+            <span>Calculated: {request.calculatedDays ?? 'pending'} · Policy version: {request.leavePolicyVersionId ?? 'not frozen'}</span>
+            <span>{request.comment ?? 'No comment'}</span>
+            {request.status === 'DRAFT' ? <details><summary>Edit draft</summary><form className="catalog-form inline-form" onSubmit={(event) => updateLeaveRequest(event, request.id)}>
+              <select name="leaveTypeId" required defaultValue={request.leaveTypeId}>{leaveTypes.map((type) => <option key={type.id} value={type.id}>{type.code}</option>)}</select>
+              <select name="orgUnitId" required defaultValue={request.orgUnitId}>{flattenOrgUnits(orgTree).map((unit) => <option key={unit.id} value={unit.id}>{unit.code}</option>)}</select>
+              <input name="startDate" type="date" required defaultValue={request.startDate} />
+              <input name="endDate" type="date" required defaultValue={request.endDate} />
+              <select name="dayPortion" defaultValue={request.dayPortion}><option>FULL_DAY</option><option>HALF_DAY</option></select>
+              <input name="comment" placeholder="Comment" defaultValue={request.comment ?? ''} />
+              <button type="submit">Update draft</button>
+            </form></details> : null}
+            {request.status === 'DRAFT' ? <button type="button" disabled={isRequestSubmitting} onClick={() => submitLeaveRequest(request.id)}>Submit</button> : null}
+          </div>)}
+        </div></article>
+        {scopedRequests.length > 0 ? <article className="panel-card"><h3>Scoped request inspector</h3><div className="catalog-list">{scopedRequests.map((request) => <div className="version-row" key={request.id}><span>{request.userDisplayName ?? request.userId}</span><span>{request.leaveTypeCode}</span><span>{request.orgUnitCode}</span><span>{request.startDate} → {request.endDate}</span><span>{request.status}</span></div>)}</div></article> : null}
       </section>
 
       <section className="admin-panel" aria-label="Balance ledger">
@@ -895,4 +986,3 @@ function CatalogForm({ title, codePlaceholder, namePlaceholder, onSubmit, includ
 function flattenOrgUnits(units: OrgUnit[]): OrgUnit[] {
   return units.flatMap((unit) => [unit, ...flattenOrgUnits(unit.children ?? [])]);
 }
-

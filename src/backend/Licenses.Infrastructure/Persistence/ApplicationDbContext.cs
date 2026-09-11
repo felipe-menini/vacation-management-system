@@ -24,6 +24,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<WorkingCalendarException> WorkingCalendarExceptions => Set<WorkingCalendarException>();
     public DbSet<BalanceAccount> BalanceAccounts => Set<BalanceAccount>();
     public DbSet<BalanceLedgerEntry> BalanceLedgerEntries => Set<BalanceLedgerEntry>();
+    public DbSet<LeaveRequest> LeaveRequests => Set<LeaveRequest>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -32,5 +33,3 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(ApplicationDbContext).Assembly);
     }
 }
-
-

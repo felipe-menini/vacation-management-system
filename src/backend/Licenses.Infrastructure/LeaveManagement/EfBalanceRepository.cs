@@ -47,13 +47,14 @@ public sealed class EfBalanceRepository(ApplicationDbContext dbContext) : IBalan
         var (availableDelta, reservedDelta) = BalanceLedgerEntry.GetDeltas(type, amount);
         reason = NormalizeReason(reason);
 
-        await using var transaction = await dbContext.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
+        var ownsTransaction = dbContext.Database.CurrentTransaction is null;
+        await using var transaction = ownsTransaction ? await dbContext.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken) : null;
 
         var existing = await FindExistingOperationAsync(operationId, cancellationToken);
         if (existing is not null)
         {
             EnsureIdempotentMatch(existing.Value, userId, balanceBucketId, type, availableDelta, reservedDelta, reason);
-            await transaction.CommitAsync(cancellationToken);
+            if (ownsTransaction) await transaction!.CommitAsync(cancellationToken);
             return new BalanceMutationRecord(existing.Value.Entry.Id, operationId, await BuildSnapshotAsync(existing.Value.Account, cancellationToken), WasAlreadyApplied: true);
         }
 
@@ -70,7 +71,7 @@ public sealed class EfBalanceRepository(ApplicationDbContext dbContext) : IBalan
         var entry = BalanceLedgerEntry.Create(account.Id, operationId, type, availableDelta, reservedDelta, reason, createdByUserId, createdAtUtc);
         await dbContext.BalanceLedgerEntries.AddAsync(entry, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        if (ownsTransaction) await transaction!.CommitAsync(cancellationToken);
 
         return new BalanceMutationRecord(entry.Id, operationId, await BuildSnapshotAsync(account, cancellationToken), WasAlreadyApplied: false);
     }

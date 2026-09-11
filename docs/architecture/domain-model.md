@@ -85,3 +85,7 @@ EP-05 implements `WorkingCalendar` as the stable calendar selected by policy ver
 EP-06 implements `BalanceAccount` as the stable grouping for one `User + BalanceBucket`. `BalanceLedgerEntry` is the immutable accounting record for `GRANT`, `RESERVE`, `RELEASE`, `CONSUME`, `REFUND`, `ADJUSTMENT`, and `EXPIRE`.
 
 A balance account has no mutable balance field. Available and reserved balances are derived from ledger deltas. Future LeaveRequest integration will use reserve/release/consume/refund primitives, but EP-06 does not implement LeaveRequest.
+
+## Implemented leave request model
+
+EP-07 implements `LeaveRequest` as the aggregate for employee-owned drafts and submissions. The request stores `OrgUnitId` explicitly so historical scope is not re-derived from later assignment changes. Drafts keep `LeavePolicyVersionId`, `CalculatedDays`, and balance linkage empty. Submission freezes the exact published `LeavePolicyVersion` resolved by `StartDate`, stores calculated quantity, and moves only `DRAFT -> PENDING_APPROVAL`.

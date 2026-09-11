@@ -1,0 +1,62 @@
+using Licenses.Application.Authorization;
+using Licenses.Application.LeaveManagement;
+
+namespace Licenses.Api.LeaveManagement;
+
+public static class LeaveRequestEndpoints
+{
+    public static IEndpointRouteBuilder MapLeaveRequestEndpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("/api/leave-requests").WithTags("Leave Requests");
+
+        group.MapGet("/me", async (ICurrentActor actor, AuthorizationService authorization, LeaveRequestService service, CancellationToken cancellationToken) =>
+        {
+            if (actor.UserId is not { } actorId) return Results.Unauthorized();
+            if (!await authorization.CanUserPerformGlobalAsync(actorId, PermissionCodes.LeaveRequestsReadSelf, cancellationToken)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+            return Results.Ok(await service.ListMyRequestsAsync(cancellationToken));
+        });
+
+        group.MapGet("/scoped", async (ICurrentActor actor, AuthorizationService authorization, LeaveRequestService service, CancellationToken cancellationToken) =>
+        {
+            if (actor.UserId is not { } actorId) return Results.Unauthorized();
+            if (!await authorization.CanUserPerformGlobalAsync(actorId, PermissionCodes.LeaveRequestsRead, cancellationToken)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+            return Results.Ok(await service.ListScopedAsync(cancellationToken));
+        });
+
+        group.MapGet("/{id:guid}", async (Guid id, ICurrentActor actor, LeaveRequestService service, CancellationToken cancellationToken) =>
+        {
+            if (actor.UserId is null) return Results.Unauthorized();
+            return await service.GetAsync(id, cancellationToken) is { } request ? Results.Ok(request) : Results.NotFound();
+        });
+
+        group.MapPost("/", async (CreateLeaveRequestCommand command, ICurrentActor actor, AuthorizationService authorization, LeaveRequestService service, CancellationToken cancellationToken) =>
+        {
+            if (actor.UserId is not { } actorId) return Results.Unauthorized();
+            if (!await authorization.CanUserPerformGlobalAsync(actorId, PermissionCodes.LeaveRequestsCreateSelf, cancellationToken)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+            var created = await service.CreateDraftAsync(command, cancellationToken);
+            return Results.Created($"/api/leave-requests/{created.Id}", created);
+        });
+
+        group.MapPut("/{id:guid}", async (Guid id, UpdateLeaveRequestCommand command, ICurrentActor actor, AuthorizationService authorization, LeaveRequestService service, CancellationToken cancellationToken) =>
+        {
+            if (actor.UserId is not { } actorId) return Results.Unauthorized();
+            if (!await authorization.CanUserPerformGlobalAsync(actorId, PermissionCodes.LeaveRequestsCreateSelf, cancellationToken)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+            return await service.UpdateDraftAsync(id, command, cancellationToken) is { } updated ? Results.Ok(updated) : Results.NotFound();
+        });
+
+        group.MapPost("/{id:guid}/submit", async (Guid id, ICurrentActor actor, AuthorizationService authorization, LeaveRequestService service, CancellationToken cancellationToken) =>
+        {
+            if (actor.UserId is not { } actorId) return Results.Unauthorized();
+            if (!await authorization.CanUserPerformGlobalAsync(actorId, PermissionCodes.LeaveRequestsCreateSelf, cancellationToken)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+            return await service.SubmitAsync(id, cancellationToken) is { } result ? Results.Ok(result) : Results.NotFound();
+        });
+
+        app.MapGet("/api/users/{userId:guid}/leave-requests", async (Guid userId, ICurrentActor actor, LeaveRequestService service, CancellationToken cancellationToken) =>
+        {
+            if (actor.UserId is null) return Results.Unauthorized();
+            return await service.ListUserRequestsAsync(userId, cancellationToken) is { } requests ? Results.Ok(requests) : Results.NotFound();
+        }).WithTags("Leave Requests");
+
+        return app;
+    }
+}
