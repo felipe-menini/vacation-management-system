@@ -111,3 +111,18 @@ EP-08 adds:
 Development seed grants `leave.requests.decide` to Supervisor, Manager, and HR. Employee does not receive it. Technical Administrator still receives no automatic business decision permission.
 
 Self-approval and self-rejection are prohibited even when the actor has this permission. Scope is evaluated against the request's stored `OrgUnitId`.
+
+## Implemented request lifecycle permissions
+
+EP-09 adds:
+
+| Permission | Description |
+| --- | --- |
+| `leave.requests.cancel.self` | Request cancellation of own approved leave requests. |
+| `leave.requests.cancel.decide` | Approve or reject cancellation requests inside authorized organizational scope. |
+| `leave.requests.revoke` | Revoke approved leave requests inside authorized organizational scope. |
+| `leave.requests.create.for_others` | Create and submit leave requests for employees inside authorized organizational scope. |
+
+Development seed grants these EP-09 scoped lifecycle permissions to Supervisor, Manager, and HR. Technical Administrator still receives no automatic business request permission.
+
+Cancellation decision and revocation are prohibited on the actor's own request even when the actor has the permission. Manual create-for-others submits through the same policy, calculation, overlap, and balance path as employee submission.

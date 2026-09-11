@@ -3,6 +3,7 @@ using System;
 using Licenses.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Licenses.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260911015621_LeaveRequestCancellationRevocationManualCreation")]
+    partial class LeaveRequestCancellationRevocationManualCreation
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -608,10 +611,6 @@ namespace Licenses.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(32)")
                         .HasColumnName("status");
 
-                    b.Property<Guid?>("SubmissionOperationId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("submission_operation_id");
-
                     b.Property<DateTime?>("SubmittedAtUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("submitted_at_utc");
@@ -637,10 +636,6 @@ namespace Licenses.Infrastructure.Persistence.Migrations
                     b.HasIndex("LeavePolicyVersionId");
 
                     b.HasIndex("LeaveTypeId");
-
-                    b.HasIndex("SubmissionOperationId")
-                        .IsUnique()
-                        .HasFilter("submission_operation_id IS NOT NULL");
 
                     b.HasIndex("OrgUnitId", "Status");
 

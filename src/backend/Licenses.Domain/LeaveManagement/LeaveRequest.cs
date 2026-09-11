@@ -34,11 +34,15 @@ public sealed class LeaveRequest
     public string? Comment { get; private set; }
     public Guid? BalanceAccountId { get; private set; }
     public Guid? BalanceReservationOperationId { get; private set; }
+    public Guid? SubmissionOperationId { get; private set; }
     public Guid CreatedByUserId { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
     public DateTime UpdatedAtUtc { get; private set; }
     public DateTime? SubmittedAtUtc { get; private set; }
     public DateTime? DecidedAtUtc { get; private set; }
+    public DateTime? CancellationRequestedAtUtc { get; private set; }
+    public DateTime? CancellationDecidedAtUtc { get; private set; }
+    public DateTime? RevokedAtUtc { get; private set; }
 
     public static LeaveRequest CreateDraft(Guid userId, Guid orgUnitId, Guid leaveTypeId, DateOnly startDate, DateOnly endDate, LeaveRequestDayPortion dayPortion, string? comment, Guid createdByUserId, DateTime createdAtUtc) =>
         new(Guid.NewGuid(), userId, orgUnitId, leaveTypeId, startDate, endDate, dayPortion, comment, createdByUserId, createdAtUtc);
@@ -56,17 +60,19 @@ public sealed class LeaveRequest
         return BalanceReservationOperationId.Value;
     }
 
-    public void Submit(Guid leavePolicyVersionId, decimal calculatedDays, Guid? balanceAccountId, Guid? reservationOperationId, DateTime submittedAtUtc)
+    public void Submit(Guid leavePolicyVersionId, decimal calculatedDays, Guid? balanceAccountId, Guid? reservationOperationId, DateTime submittedAtUtc, Guid? submissionOperationId = null)
     {
         EnsureDraft();
         if (leavePolicyVersionId == Guid.Empty) throw new ArgumentException("LeavePolicyVersionId is required.", nameof(leavePolicyVersionId));
         if (calculatedDays <= 0m) throw new ArgumentOutOfRangeException(nameof(calculatedDays), "Calculated days must be positive.");
+        if (submissionOperationId == Guid.Empty) throw new ArgumentException("SubmissionOperationId cannot be empty.", nameof(submissionOperationId));
         if (balanceAccountId is null && reservationOperationId is not null) throw new InvalidOperationException("Reservation operation requires a balance account.");
         if (balanceAccountId is not null && reservationOperationId is null) throw new InvalidOperationException("Balance account requires a reservation operation.");
         LeavePolicyVersionId = leavePolicyVersionId;
         CalculatedDays = calculatedDays;
         BalanceAccountId = balanceAccountId;
         BalanceReservationOperationId = reservationOperationId;
+        SubmissionOperationId = submissionOperationId ?? reservationOperationId;
         SubmittedAtUtc = EnsureUtc(submittedAtUtc, nameof(submittedAtUtc));
         UpdatedAtUtc = SubmittedAtUtc.Value;
         Status = LeaveRequestStatus.PendingApproval;
@@ -86,6 +92,38 @@ public sealed class LeaveRequest
         DecidedAtUtc = EnsureUtc(decidedAtUtc, nameof(decidedAtUtc));
         UpdatedAtUtc = DecidedAtUtc.Value;
         Status = LeaveRequestStatus.Rejected;
+    }
+
+    public void RequestCancellation(DateTime requestedAtUtc)
+    {
+        EnsureApproved("Only APPROVED leave requests can request cancellation.");
+        CancellationRequestedAtUtc = EnsureUtc(requestedAtUtc, nameof(requestedAtUtc));
+        UpdatedAtUtc = CancellationRequestedAtUtc.Value;
+        Status = LeaveRequestStatus.CancellationRequested;
+    }
+
+    public void ApproveCancellation(DateTime decidedAtUtc)
+    {
+        EnsureCancellationRequested();
+        CancellationDecidedAtUtc = EnsureUtc(decidedAtUtc, nameof(decidedAtUtc));
+        UpdatedAtUtc = CancellationDecidedAtUtc.Value;
+        Status = LeaveRequestStatus.Cancelled;
+    }
+
+    public void RejectCancellation(DateTime decidedAtUtc)
+    {
+        EnsureCancellationRequested();
+        CancellationDecidedAtUtc = EnsureUtc(decidedAtUtc, nameof(decidedAtUtc));
+        UpdatedAtUtc = CancellationDecidedAtUtc.Value;
+        Status = LeaveRequestStatus.Approved;
+    }
+
+    public void Revoke(DateTime revokedAtUtc)
+    {
+        EnsureApproved("Only APPROVED leave requests can be revoked.");
+        RevokedAtUtc = EnsureUtc(revokedAtUtc, nameof(revokedAtUtc));
+        UpdatedAtUtc = RevokedAtUtc.Value;
+        Status = LeaveRequestStatus.Revoked;
     }
 
     public static bool IsActiveOverlapStatus(LeaveRequestStatus status) => status is LeaveRequestStatus.PendingApproval or LeaveRequestStatus.Approved or LeaveRequestStatus.CancellationRequested;
@@ -113,6 +151,16 @@ public sealed class LeaveRequest
     private void EnsurePendingApproval()
     {
         if (Status != LeaveRequestStatus.PendingApproval) throw new InvalidOperationException("Only PENDING_APPROVAL leave requests can be decided.");
+    }
+
+    private void EnsureApproved(string message)
+    {
+        if (Status != LeaveRequestStatus.Approved) throw new InvalidOperationException(message);
+    }
+
+    private void EnsureCancellationRequested()
+    {
+        if (Status != LeaveRequestStatus.CancellationRequested) throw new InvalidOperationException("Only CANCELLATION_REQUESTED leave requests can be decided.");
     }
 
     private static string? NormalizeOptional(string? value, int maxLength, string name)
