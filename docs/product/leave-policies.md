@@ -72,7 +72,7 @@ The implemented policy model now separates stable `LeavePolicy` records from eff
 
 Published versions are immutable and resolver-visible. Draft versions can be edited but never resolve. Published periods for the same policy must not overlap. Policy resolution prefers the deepest applicable OrgUnit override and then falls back to the company-wide LeaveType policy. A future LeaveRequest must reference the exact published `LeavePolicyVersion` used during evaluation.
 
-EP-04 stores day count mode, half-day allowance, notice days/mode, maximum request days, overlap behavior, and balance consumption bucket. Later EPs added working-calendar day calculation, leave requests, approvals, balance ledger integration, documents, audit, and minimum-notice enforcement. Carry-over, expiry automation, Entra, SharePoint, and capacity remain deferred.
+EP-04 stores day count mode, half-day allowance, notice days/mode, maximum request days, overlap behavior, and balance consumption bucket. Later EPs added working-calendar day calculation, leave requests, approvals, balance ledger integration, documents, audit, minimum-notice enforcement, and maximum-request-days enforcement on submission. Carry-over, expiry automation, Entra, SharePoint, and capacity remain deferred.
 
 ## Implemented EP-05 working-calendar slice
 

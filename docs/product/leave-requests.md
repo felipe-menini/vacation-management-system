@@ -64,7 +64,7 @@ EP-09 allows authorized actors to create a leave request for another employee in
 
 Employees can create, edit, submit, list, read, and request cancellation of their own requests. Supervisor, Manager, and HR may read, decide, resolve cancellations, revoke, and create requests for others inside organizational scope when granted the corresponding permissions. Technical administrators receive no automatic business request permission.
 
-MinimumNoticeDays is enforced by the backend at submission. Draft creation/editing may temporarily violate notice rules. Manual create-for-others follows the same rule; no administrative or retroactive bypass exists yet. A failed notice submission leaves the request in DRAFT and has no balance, audit, outbox, status, or approval-history side effects.
+MinimumNoticeDays and MaximumRequestDays are enforced by the backend at submission. Draft creation/editing may temporarily violate notice or maximum-duration rules. MaximumRequestDays uses the backend-calculated request quantity, including WorkingCalendar-derived business days and existing half-day semantics. Manual create-for-others follows the same rules; no administrative or retroactive bypass exists yet. A failed notice or maximum-duration submission leaves the request in DRAFT and has no balance, audit, outbox, status, or approval-history side effects.
 
 ## Private medical certificates
 

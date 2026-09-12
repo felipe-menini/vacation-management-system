@@ -71,6 +71,40 @@ public sealed class LeaveRequestMinimumNoticeEndpointTests(WebApplicationFactory
         Assert.Single(sufficient.Outbox.Messages);
     }
 
+    [Fact]
+    public async Task SelfSubmitAboveMaximumRequestDaysReturnsBusinessValidationWithoutInternals()
+    {
+        var setup = TestSetup.Create(minimumNoticeDays: 0, startDate: new DateOnly(2026, 10, 1), endDate: new DateOnly(2026, 10, 3), maximumRequestDays: 2m);
+        using var client = CreateClient(setup, setup.Employee.Id, PermissionCodes.LeaveRequestsCreateSelf);
+
+        using var response = await client.PostAsync($"/api/leave-requests/{setup.Request.Id}/submit", null);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("MAXIMUM_REQUEST_DAYS_EXCEEDED", body);
+        Assert.Contains("maximumRequestDays", body);
+        Assert.Contains("calculatedDays", body);
+        Assert.DoesNotContain("stack", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(LeaveRequestStatus.Draft, setup.Request.Status);
+        Assert.Empty(setup.Outbox.Messages);
+        Assert.Empty(setup.Audit.Events);
+    }
+
+    [Fact]
+    public async Task ManualCreateForOtherAboveMaximumRequestDaysReturnsBusinessValidation()
+    {
+        var setup = TestSetup.Create(minimumNoticeDays: 0, startDate: new DateOnly(2026, 10, 1), maximumRequestDays: 1m);
+        using var client = CreateClient(setup, setup.Approver.Id, PermissionCodes.LeaveRequestsCreateForOthers);
+        var command = new CreateLeaveRequestForUserCommand(setup.Unit.Id, setup.Type.Id, new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 2), "FULL_DAY", "Manual", Guid.NewGuid());
+
+        using var response = await client.PostAsJsonAsync($"/api/users/{setup.Employee.Id}/leave-requests", command);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("MAXIMUM_REQUEST_DAYS_EXCEEDED", body);
+        Assert.Empty(setup.Outbox.Messages);
+    }
+
     private HttpClient CreateClient(TestSetup setup, Guid actorId, params string[] permissions) => factory.WithWebHostBuilder(builder =>
     {
         builder.UseEnvironment("Testing");
@@ -90,16 +124,16 @@ public sealed class LeaveRequestMinimumNoticeEndpointTests(WebApplicationFactory
 
     private sealed record TestSetup(User Employee, User Approver, OrgUnit Unit, LeaveType Type, LeavePolicy Policy, LeavePolicyVersion Version, LeaveRequest Request, FakeLeaveRequestRepository Requests, FakeApplicationEventOutbox Outbox, FakeAuditWriter Audit)
     {
-        public static TestSetup Create(int minimumNoticeDays, DateOnly startDate)
+        public static TestSetup Create(int minimumNoticeDays, DateOnly startDate, DateOnly? endDate = null, decimal? maximumRequestDays = null)
         {
             var employee = User.Create("Employee", $"employee.{Guid.NewGuid():N}@example.test", null, Now);
             var approver = User.Create("Approver", $"approver.{Guid.NewGuid():N}@example.test", null, Now);
             var unit = OrgUnit.Create("Engineering", "ENG" + Guid.NewGuid().ToString("N")[..8], null, Now);
             var type = LeaveType.Create("VAC" + Guid.NewGuid().ToString("N")[..8], "Vacation", null, 1, true, Now);
             var policy = LeavePolicy.Create(type.Id, null, false, true, Now);
-            var version = LeavePolicyVersion.CreateDraft(policy.Id, 1, new DateOnly(2026, 1, 1), null, PolicyDayCountMode.CalendarDays, true, minimumNoticeDays, PolicyDayCountMode.CalendarDays, null, PolicyOverlapBehavior.Block, false, null, null, Now);
+            var version = LeavePolicyVersion.CreateDraft(policy.Id, 1, new DateOnly(2026, 1, 1), null, PolicyDayCountMode.CalendarDays, true, minimumNoticeDays, PolicyDayCountMode.CalendarDays, maximumRequestDays, PolicyOverlapBehavior.Block, false, null, null, Now);
             version.Publish(Now);
-            var request = LeaveRequest.CreateDraft(employee.Id, unit.Id, type.Id, startDate, startDate, LeaveRequestDayPortion.FullDay, "Draft", employee.Id, Now);
+            var request = LeaveRequest.CreateDraft(employee.Id, unit.Id, type.Id, startDate, endDate ?? startDate, LeaveRequestDayPortion.FullDay, "Draft", employee.Id, Now);
             var setup = new TestSetup(employee, approver, unit, type, policy, version, request, null!, new FakeApplicationEventOutbox(), new FakeAuditWriter());
             return setup with { Requests = new FakeLeaveRequestRepository(setup) };
         }
