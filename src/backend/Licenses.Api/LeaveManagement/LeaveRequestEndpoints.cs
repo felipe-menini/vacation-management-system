@@ -67,6 +67,7 @@ public static class LeaveRequestEndpoints
                 return await service.SubmitAsync(id, cancellationToken) is { } result ? Results.Ok(result) : Results.NotFound();
             }
             catch (MinimumNoticeValidationException ex) { return Results.BadRequest(ToMinimumNoticeError(ex)); }
+            catch (MaximumRequestDaysValidationException ex) { return Results.BadRequest(ToMaximumRequestDaysError(ex)); }
             catch (UnauthorizedAccessException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status403Forbidden); }
             catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
             catch (InvalidOperationException ex) { return Results.Conflict(new { error = ex.Message }); }
@@ -155,6 +156,7 @@ public static class LeaveRequestEndpoints
                 return Results.Created($"/api/leave-requests/{result.Request.Id}", result);
             }
             catch (MinimumNoticeValidationException ex) { return Results.BadRequest(ToMinimumNoticeError(ex)); }
+            catch (MaximumRequestDaysValidationException ex) { return Results.BadRequest(ToMaximumRequestDaysError(ex)); }
             catch (UnauthorizedAccessException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status403Forbidden); }
             catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
             catch (InvalidOperationException ex) { return Results.Conflict(new { error = ex.Message }); }
@@ -177,5 +179,19 @@ public static class LeaveRequestEndpoints
         },
         businessToday = ex.BusinessToday,
         startDate = ex.StartDate
+    };
+
+    private static object ToMaximumRequestDaysError(MaximumRequestDaysValidationException ex) => new
+    {
+        error = ex.Message,
+        code = ex.Code,
+        maximumRequestDays = ex.MaximumRequestDays,
+        calculatedDays = ex.CalculatedDays,
+        dayCountMode = ex.DayCountMode switch
+        {
+            Licenses.Domain.LeaveManagement.PolicyDayCountMode.CalendarDays => "CALENDAR_DAYS",
+            Licenses.Domain.LeaveManagement.PolicyDayCountMode.BusinessDays => "BUSINESS_DAYS",
+            _ => ex.DayCountMode.ToString().ToUpperInvariant()
+        }
     };
 }

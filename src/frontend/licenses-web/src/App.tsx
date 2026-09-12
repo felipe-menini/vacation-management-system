@@ -29,7 +29,7 @@ type AuditFilters = { action: string; resourceType: string; fromUtc: string; toU
 type Role = { id: string; code: string; name: string; description: string; isActive: boolean };
 type UserOrgAssignment = { id: string; userId: string; orgUnitId: string; orgUnitName: string; isPrimary: boolean; effectiveFromUtc: string; effectiveToUtc: string | null };
 type RoleScopeAssignment = { id: string; userId: string; roleId: string; roleCode: string; orgUnitId: string; includeDescendants: boolean; effectiveFromUtc: string; effectiveToUtc: string | null };
-type ApiErrorPayload = { error?: string; title?: string; detail?: string; code?: string; minimumNoticeDays?: number; calculatedNoticeDays?: number | null; noticeDayCountMode?: string; businessToday?: string | null; startDate?: string | null };
+type ApiErrorPayload = { error?: string; title?: string; detail?: string; code?: string; minimumNoticeDays?: number; calculatedNoticeDays?: number | null; noticeDayCountMode?: string; businessToday?: string | null; startDate?: string | null; maximumRequestDays?: number; calculatedDays?: number; dayCountMode?: string };
 
 type StatusCardProps = { label: string; status: HealthStatus };
 type CatalogKind = 'leave-types' | 'balance-buckets';
@@ -61,6 +61,13 @@ async function fetchHealth(path: string): Promise<HealthStatus> {
 }
 
 function formatApiError(payload: ApiErrorPayload, fallback: string): string {
+  if (payload.code === 'MAXIMUM_REQUEST_DAYS_EXCEEDED' && typeof payload.maximumRequestDays === 'number' && typeof payload.calculatedDays === 'number') {
+    const mode = payload.dayCountMode === 'BUSINESS_DAYS' ? 'business' : 'calendar';
+    const maximumUnit = payload.maximumRequestDays === 1 ? `${mode} day` : `${mode} days`;
+    const calculatedUnit = payload.calculatedDays === 1 ? `${mode} day` : `${mode} days`;
+    return `This leave type allows a maximum of ${payload.maximumRequestDays} ${maximumUnit} per request. Your request contains ${payload.calculatedDays} calculated ${calculatedUnit}.`;
+  }
+
   if (payload.code === 'INSUFFICIENT_MINIMUM_NOTICE' && typeof payload.minimumNoticeDays === 'number') {
     const mode = payload.noticeDayCountMode === 'BUSINESS_DAYS' ? 'business days' : 'calendar days';
     const provided = typeof payload.calculatedNoticeDays === 'number'

@@ -184,6 +184,120 @@ public sealed class LeaveRequestApprovalServiceTests
         Assert.Equal("MINIMUM_NOTICE_CALCULATION_FAILED", ex.Code);
         AssertFailureHasNoSubmissionSideEffects(past);
     }
+
+    [Theory]
+    [InlineData(5, 4, true)]
+    [InlineData(5, 5, true)]
+    [InlineData(5, 6, false)]
+    public async Task SelfSubmissionEnforcesCalendarMaximumRequestDays(decimal maximumRequestDays, int durationDays, bool succeeds)
+    {
+        var start = new DateOnly(2026, 10, 1);
+        var setup = TestSetup.CreateDraft(
+            consumesBalance: true,
+            maximumRequestDays: maximumRequestDays,
+            requestStartDate: start,
+            requestEndDate: start.AddDays(durationDays - 1));
+        var service = setup.CreateService(setup.Employee.Id, PermissionCodes.LeaveRequestsCreateSelf);
+
+        if (succeeds)
+        {
+            var result = await service.SubmitAsync(setup.Request.Id, CancellationToken.None);
+            Assert.Equal("PENDING_APPROVAL", result!.Request.Status);
+            Assert.Equal(durationDays, result.Request.CalculatedDays);
+            Assert.Single(setup.Balances.Mutations);
+            Assert.Single(setup.Outbox.Messages);
+            Assert.Single(setup.Audit.Events);
+        }
+        else
+        {
+            var ex = await Assert.ThrowsAsync<MaximumRequestDaysValidationException>(() => service.SubmitAsync(setup.Request.Id, CancellationToken.None)!);
+            Assert.Equal("MAXIMUM_REQUEST_DAYS_EXCEEDED", ex.Code);
+            Assert.Equal(maximumRequestDays, ex.MaximumRequestDays);
+            Assert.Equal(durationDays, ex.CalculatedDays);
+            AssertFailureHasNoSubmissionSideEffects(setup);
+        }
+    }
+
+    [Fact]
+    public async Task BusinessDayMaximumRequestDaysUsesCalculatedDaysIncludingCalendarExceptions()
+    {
+        var calendar = StandardCalendar();
+        calendar.AddException(new DateOnly(2026, 10, 12), "Holiday", false, Now);
+        calendar.AddException(new DateOnly(2026, 10, 10), "Working Saturday", true, Now);
+        var exact = TestSetup.CreateDraft(
+            consumesBalance: false,
+            maximumRequestDays: 6m,
+            dayCountMode: PolicyDayCountMode.BusinessDays,
+            workingCalendar: calendar,
+            requestStartDate: new DateOnly(2026, 10, 9),
+            requestEndDate: new DateOnly(2026, 10, 16));
+
+        var accepted = await exact.CreateService(exact.Employee.Id, PermissionCodes.LeaveRequestsCreateSelf).SubmitAsync(exact.Request.Id, CancellationToken.None);
+
+        Assert.Equal("PENDING_APPROVAL", accepted!.Request.Status);
+        Assert.Equal(6m, accepted.Request.CalculatedDays);
+
+        var above = TestSetup.CreateDraft(
+            consumesBalance: false,
+            maximumRequestDays: 5m,
+            dayCountMode: PolicyDayCountMode.BusinessDays,
+            workingCalendar: calendar,
+            requestStartDate: new DateOnly(2026, 10, 9),
+            requestEndDate: new DateOnly(2026, 10, 16));
+
+        var ex = await Assert.ThrowsAsync<MaximumRequestDaysValidationException>(() => above.CreateService(above.Employee.Id, PermissionCodes.LeaveRequestsCreateSelf).SubmitAsync(above.Request.Id, CancellationToken.None)!);
+        Assert.Equal(6m, ex.CalculatedDays);
+        AssertFailureHasNoSubmissionSideEffects(above);
+    }
+
+    [Fact]
+    public async Task MaximumRequestDaysPreservesHalfDayAndNullMaximumSemantics()
+    {
+        var halfDay = TestSetup.CreateDraft(
+            consumesBalance: false,
+            maximumRequestDays: 0.5m,
+            dayPortion: LeaveRequestDayPortion.HalfDay,
+            requestStartDate: new DateOnly(2026, 10, 1),
+            requestEndDate: new DateOnly(2026, 10, 1));
+
+        var halfDayResult = await halfDay.CreateService(halfDay.Employee.Id, PermissionCodes.LeaveRequestsCreateSelf).SubmitAsync(halfDay.Request.Id, CancellationToken.None);
+
+        Assert.Equal(0.5m, halfDayResult!.Request.CalculatedDays);
+
+        var noMaximum = TestSetup.CreateDraft(
+            consumesBalance: false,
+            maximumRequestDays: null,
+            requestStartDate: new DateOnly(2026, 10, 1),
+            requestEndDate: new DateOnly(2026, 10, 30));
+
+        var noMaximumResult = await noMaximum.CreateService(noMaximum.Employee.Id, PermissionCodes.LeaveRequestsCreateSelf).SubmitAsync(noMaximum.Request.Id, CancellationToken.None);
+
+        Assert.Equal("PENDING_APPROVAL", noMaximumResult!.Request.Status);
+        Assert.Equal(30m, noMaximumResult.Request.CalculatedDays);
+    }
+
+    [Fact]
+    public async Task ManualCreateForOthersUsesMaximumRequestDaysWithoutPrivilegedBypass()
+    {
+        var above = TestSetup.CreateDraft(consumesBalance: true, maximumRequestDays: 1m);
+        var rejected = new CreateLeaveRequestForUserCommand(above.Unit.Id, above.Type.Id, new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 2), "FULL_DAY", "Manual", Guid.NewGuid());
+
+        var ex = await Assert.ThrowsAsync<MaximumRequestDaysValidationException>(() => above.CreateService(above.Approver.Id, PermissionCodes.LeaveRequestsCreateForOthers).CreateForUserAsync(above.Employee.Id, rejected, CancellationToken.None));
+
+        Assert.Equal("MAXIMUM_REQUEST_DAYS_EXCEEDED", ex.Code);
+        Assert.Empty(above.Balances.Mutations);
+        Assert.Empty(above.Outbox.Messages);
+        Assert.Empty(above.Audit.Events);
+
+        var within = TestSetup.CreateDraft(consumesBalance: true, maximumRequestDays: 2m);
+        var accepted = new CreateLeaveRequestForUserCommand(within.Unit.Id, within.Type.Id, new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 2), "FULL_DAY", "Manual", Guid.NewGuid());
+        var result = await within.CreateService(within.Approver.Id, PermissionCodes.LeaveRequestsCreateForOthers).CreateForUserAsync(within.Employee.Id, accepted, CancellationToken.None);
+
+        Assert.Equal("PENDING_APPROVAL", result.Request.Status);
+        Assert.Single(within.Balances.Mutations);
+        Assert.Single(within.Outbox.Messages);
+        Assert.Single(within.Audit.Events);
+    }
     [Fact]
     public async Task SelfDecisionAndOperationIdConflictsAreRejected()
     {
@@ -379,14 +493,17 @@ public sealed class LeaveRequestApprovalServiceTests
             bool consumesBalance,
             int? minimumNoticeDays = null,
             PolicyDayCountMode noticeMode = PolicyDayCountMode.CalendarDays,
+            decimal? maximumRequestDays = null,
+            PolicyDayCountMode dayCountMode = PolicyDayCountMode.CalendarDays,
+            LeaveRequestDayPortion dayPortion = LeaveRequestDayPortion.FullDay,
             WorkingCalendar? workingCalendar = null,
             bool exposeCalendarToCalculator = true,
             DateTime? utcNow = null,
             DateOnly? requestStartDate = null,
             DateOnly? requestEndDate = null) =>
-            CreateCore(consumesBalance, submitted: false, minimumNoticeDays, noticeMode, workingCalendar, exposeCalendarToCalculator, utcNow, requestStartDate, requestEndDate);
+            CreateCore(consumesBalance, submitted: false, minimumNoticeDays, noticeMode, maximumRequestDays, dayCountMode, dayPortion, workingCalendar, exposeCalendarToCalculator, utcNow, requestStartDate, requestEndDate);
 
-        private static TestSetup CreateCore(bool consumesBalance, bool submitted, int? minimumNoticeDays = null, PolicyDayCountMode noticeMode = PolicyDayCountMode.CalendarDays, WorkingCalendar? workingCalendar = null, bool exposeCalendarToCalculator = true, DateTime? utcNow = null, DateOnly? requestStartDate = null, DateOnly? requestEndDate = null)
+        private static TestSetup CreateCore(bool consumesBalance, bool submitted, int? minimumNoticeDays = null, PolicyDayCountMode noticeMode = PolicyDayCountMode.CalendarDays, decimal? maximumRequestDays = null, PolicyDayCountMode dayCountMode = PolicyDayCountMode.CalendarDays, LeaveRequestDayPortion dayPortion = LeaveRequestDayPortion.FullDay, WorkingCalendar? workingCalendar = null, bool exposeCalendarToCalculator = true, DateTime? utcNow = null, DateOnly? requestStartDate = null, DateOnly? requestEndDate = null)
         {
             var now = utcNow ?? Now;
             var employee = User.Create("Employee", $"employee.{Guid.NewGuid():N}@example.test", null, Now);
@@ -395,16 +512,16 @@ public sealed class LeaveRequestApprovalServiceTests
             var type = LeaveType.Create("VAC" + Guid.NewGuid().ToString("N")[..8], "Vacation", null, 1, true, Now);
             var bucketId = consumesBalance ? Guid.NewGuid() : (Guid?)null;
             var policy = LeavePolicy.Create(type.Id, null, false, true, Now);
-            var version = LeavePolicyVersion.CreateDraft(policy.Id, 1, new DateOnly(2026, 1, 1), null, PolicyDayCountMode.CalendarDays, true, minimumNoticeDays, noticeMode, null, PolicyOverlapBehavior.Block, consumesBalance, bucketId, workingCalendar?.Id, Now);
+            var version = LeavePolicyVersion.CreateDraft(policy.Id, 1, new DateOnly(2026, 1, 1), null, dayCountMode, true, minimumNoticeDays, noticeMode, maximumRequestDays, PolicyOverlapBehavior.Block, consumesBalance, bucketId, workingCalendar?.Id, Now);
             version.Publish(Now);
-            var request = LeaveRequest.CreateDraft(employee.Id, unit.Id, type.Id, requestStartDate ?? new DateOnly(2026, 9, 1), requestEndDate ?? new DateOnly(2026, 9, 2), LeaveRequestDayPortion.FullDay, "Employee comment", employee.Id, Now);
+            var request = LeaveRequest.CreateDraft(employee.Id, unit.Id, type.Id, requestStartDate ?? new DateOnly(2026, 9, 1), requestEndDate ?? new DateOnly(2026, 9, 2), dayPortion, "Employee comment", employee.Id, Now);
             if (submitted)
             {
                 request.EnsureReservationOperationId();
                 request.Submit(version.Id, 2m, consumesBalance ? Guid.NewGuid() : null, consumesBalance ? request.BalanceReservationOperationId : null, Now);
             }
             var balances = new FakeBalanceRepository(bucketId);
-            var requests = new FakeLeaveRequestRepository(employee, approver, unit, type, policy, version, request);
+            var requests = new FakeLeaveRequestRepository(employee, approver, unit, type, policy, version, request, workingCalendar);
             var outbox = new FakeApplicationEventOutbox();
             var audit = new FakeAuditWriter();
             return new(employee, approver, unit, type, policy, version, request, requests, balances, outbox, audit, workingCalendar, exposeCalendarToCalculator, now);
@@ -422,7 +539,7 @@ public sealed class LeaveRequestApprovalServiceTests
         }
     }
 
-    private sealed class FakeLeaveRequestRepository(User employee, User approver, OrgUnit unit, LeaveType type, LeavePolicy policy, LeavePolicyVersion version, LeaveRequest request) : ILeaveRequestRepository
+    private sealed class FakeLeaveRequestRepository(User employee, User approver, OrgUnit unit, LeaveType type, LeavePolicy policy, LeavePolicyVersion version, LeaveRequest request, WorkingCalendar? workingCalendar) : ILeaveRequestRepository
     {
         private readonly List<LeaveRequest> _requests = [request];
         private readonly List<LeaveRequestDecision> _decisions = [];
@@ -461,7 +578,7 @@ public sealed class LeaveRequestApprovalServiceTests
         public Task<LeaveType?> GetLeaveTypeAsync(Guid id, CancellationToken ct) => Task.FromResult<LeaveType?>(id == type.Id ? type : null);
         public Task<LeavePolicy?> GetPolicyAsync(Guid id, CancellationToken ct) => Task.FromResult<LeavePolicy?>(policy);
         public Task<LeavePolicyVersion?> GetPolicyVersionAsync(Guid id, CancellationToken ct) => Task.FromResult<LeavePolicyVersion?>(id == version.Id ? version : null);
-        public Task<WorkingCalendar?> GetWorkingCalendarAsync(Guid id, CancellationToken ct) => Task.FromResult<WorkingCalendar?>(null);
+        public Task<WorkingCalendar?> GetWorkingCalendarAsync(Guid id, CancellationToken ct) => Task.FromResult<WorkingCalendar?>(workingCalendar?.Id == id ? workingCalendar : null);
         public Task<Guid?> GetBalanceAccountIdAsync(Guid userId, Guid balanceBucketId, CancellationToken ct) => Task.FromResult<Guid?>(_requests.LastOrDefault(x => x.UserId == userId)?.BalanceAccountId ?? _balanceAccountId);
         public Task<bool> HasEffectiveAssignmentAsync(Guid userId, Guid orgUnitId, DateOnly date, CancellationToken ct) => Task.FromResult(true);
         public Task<IReadOnlyList<LeaveRequest>> ListOverlappingAsync(Guid userId, DateOnly start, DateOnly end, Guid excluding, CancellationToken ct) => Task.FromResult<IReadOnlyList<LeaveRequest>>([]);

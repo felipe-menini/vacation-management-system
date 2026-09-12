@@ -150,7 +150,8 @@ public sealed class LeaveRequestService(ILeaveRequestRepository repository, ILea
 
         await EnforceMinimumNoticeAsync(request, version, cancellationToken);
         var calculatedDays = await CalculateAsync(request, version, cancellationToken);
-        if (version.MaximumRequestDays is not null && calculatedDays > version.MaximumRequestDays.Value) throw new InvalidOperationException("Requested days exceed the policy maximum.");
+        if (version.MaximumRequestDays is { } maximumRequestDays && calculatedDays > maximumRequestDays)
+            throw MaximumRequestDaysValidationException.Exceeded(maximumRequestDays, calculatedDays, version.DayCountMode);
 
         var overlaps = await repository.ListOverlappingAsync(request.UserId, request.StartDate, request.EndDate, request.Id, cancellationToken);
         var activeOverlaps = overlaps.Where(x => LeaveRequest.IsActiveOverlapStatus(x.Status)).ToList();
