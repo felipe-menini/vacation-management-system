@@ -43,6 +43,7 @@ public sealed class LeaveRequest
     public DateTime? CancellationRequestedAtUtc { get; private set; }
     public DateTime? CancellationDecidedAtUtc { get; private set; }
     public DateTime? RevokedAtUtc { get; private set; }
+    public DateTime? CompletedAtUtc { get; private set; }
 
     public static LeaveRequest CreateDraft(Guid userId, Guid orgUnitId, Guid leaveTypeId, DateOnly startDate, DateOnly endDate, LeaveRequestDayPortion dayPortion, string? comment, Guid createdByUserId, DateTime createdAtUtc) =>
         new(Guid.NewGuid(), userId, orgUnitId, leaveTypeId, startDate, endDate, dayPortion, comment, createdByUserId, createdAtUtc);
@@ -124,6 +125,18 @@ public sealed class LeaveRequest
         RevokedAtUtc = EnsureUtc(revokedAtUtc, nameof(revokedAtUtc));
         UpdatedAtUtc = RevokedAtUtc.Value;
         Status = LeaveRequestStatus.Revoked;
+    }
+
+    public bool IsEligibleForCompletion(DateOnly businessToday) =>
+        Status == LeaveRequestStatus.Approved && EndDate < businessToday;
+
+    public bool Complete(DateOnly businessToday, DateTime completedAtUtc)
+    {
+        if (!IsEligibleForCompletion(businessToday)) return false;
+        CompletedAtUtc = EnsureUtc(completedAtUtc, nameof(completedAtUtc));
+        UpdatedAtUtc = CompletedAtUtc.Value;
+        Status = LeaveRequestStatus.Completed;
+        return true;
     }
 
     public static bool IsActiveOverlapStatus(LeaveRequestStatus status) => status is LeaveRequestStatus.PendingApproval or LeaveRequestStatus.Approved or LeaveRequestStatus.CancellationRequested;

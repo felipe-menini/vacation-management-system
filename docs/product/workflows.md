@@ -44,7 +44,7 @@ stateDiagram-v2
 6. When all steps complete, reservation becomes consumption. On rejection, reservation is released.
 7. A domain/outbox event is recorded so notification failure does not roll back the business transaction.
 
-This describes the broader target workflow. EP-08 implements one final approval decision. EP-09 implements cancellation, revocation, and manual create-for-others. EP-11 implements outbound workflow notification events through the transactional outbox and worker. Routing, multi-step approval, completion automation, and frontend notification-center behavior remain deferred.
+This describes the broader target workflow. EP-08 implements one final approval decision. EP-09 implements cancellation, revocation, and manual create-for-others. EP-11 implements outbound workflow notification events through the transactional outbox and worker. EP-15 implements automatic completion after the approved leave period has ended. Routing, multi-step approval, and frontend notification-center behavior remain deferred.
 
 ## Cancellation flow
 
@@ -70,6 +70,6 @@ DRAFT -> PENDING_APPROVAL -> APPROVED
                          \-> REJECTED
 ```
 
-There is one final approval decision. Multi-step approval, configurable routing, and completion automation are intentionally deferred. EP-11 sends outbound workflow notifications from committed outbox events; frontend notification-center behavior remains out of scope.
+There is one final approval decision. Multi-step approval and configurable routing are intentionally deferred. EP-11 sends outbound workflow notifications from committed outbox events; frontend notification-center behavior remains out of scope. EP-15 completes approved requests automatically after the approved leave period has ended; completion has no notification/outbox event.
 
 Approval consumes the existing reservation. Rejection releases it. Both use the frozen submitted request values and store immutable decision history.

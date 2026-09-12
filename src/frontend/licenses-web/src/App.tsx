@@ -21,7 +21,7 @@ type LeaveRequestDecision = { id: string; leaveRequestId: string; decision: stri
 type LeaveRequestCancellation = { id: string; leaveRequestId: string; requestedByUserId: string; requestedByUserDisplayName: string | null; reason: string; operationId: string; requestedAtUtc: string; decision: string | null; decidedByUserId: string | null; decidedByUserDisplayName: string | null; decisionComment: string | null; decisionOperationId: string | null; balanceSettlementOperationId: string | null; decidedAtUtc: string | null };
 type LeaveRequestRevocation = { id: string; leaveRequestId: string; revokedByUserId: string; revokedByUserDisplayName: string | null; reason: string; operationId: string; balanceSettlementOperationId: string | null; createdAtUtc: string };
 type LeaveRequestDocument = { id: string; leaveRequestId: string; kind: string; originalFileName: string; contentType: string; sizeBytes: number; sha256: string; uploadedByUserId: string; uploadedByUserDisplayName: string | null; createdAtUtc: string };
-type LeaveRequest = { id: string; userId: string; userDisplayName: string | null; orgUnitId: string; orgUnitCode: string | null; orgUnitName: string | null; leaveTypeId: string; leaveTypeCode: string | null; leaveTypeName: string | null; leavePolicyVersionId: string | null; startDate: string; endDate: string; dayPortion: string; calculatedDays: number | null; status: string; comment: string | null; balanceAccountId: string | null; balanceReservationOperationId: string | null; submissionOperationId: string | null; createdByUserId: string; createdByUserDisplayName: string | null; createdAtUtc: string; submittedAtUtc: string | null; decidedAtUtc: string | null; cancellationRequestedAtUtc: string | null; cancellationDecidedAtUtc: string | null; revokedAtUtc: string | null; decision: LeaveRequestDecision | null; cancellation: LeaveRequestCancellation | null; revocation: LeaveRequestRevocation | null; documents: LeaveRequestDocument[] };
+type LeaveRequest = { id: string; userId: string; userDisplayName: string | null; orgUnitId: string; orgUnitCode: string | null; orgUnitName: string | null; leaveTypeId: string; leaveTypeCode: string | null; leaveTypeName: string | null; leavePolicyVersionId: string | null; startDate: string; endDate: string; dayPortion: string; calculatedDays: number | null; status: string; comment: string | null; balanceAccountId: string | null; balanceReservationOperationId: string | null; submissionOperationId: string | null; createdByUserId: string; createdByUserDisplayName: string | null; createdAtUtc: string; submittedAtUtc: string | null; decidedAtUtc: string | null; cancellationRequestedAtUtc: string | null; cancellationDecidedAtUtc: string | null; revokedAtUtc: string | null; completedAtUtc: string | null; decision: LeaveRequestDecision | null; cancellation: LeaveRequestCancellation | null; revocation: LeaveRequestRevocation | null; documents: LeaveRequestDocument[] };
 type SubmitLeaveRequestResult = { request: LeaveRequest; warnings: string[]; wasAlreadySubmitted: boolean };
 type AuditEvent = { id: string; occurredAtUtc: string; action: string; resourceType: string; resourceId: string | null; actorUserId: string | null; actorDisplayName: string | null; subjectUserId: string | null; subjectDisplayName: string | null; orgUnitId: string | null; orgUnitName: string | null; correlationId: string | null; metadataJson: string | null };
 type AuditEventListResult = { items: AuditEvent[]; page: number; pageSize: number; totalCount: number; hasNextPage: boolean };
@@ -133,6 +133,14 @@ function dateInputToUtc(value: FormDataEntryValue | null): string | null {
 
 function toDateInput(value: string | null): string {
   return value ? value.slice(0, 10) : '';
+}
+
+function statusBadgeClass(status: string): string {
+  return status.toLowerCase().replaceAll('_', '-');
+}
+
+function formatTimestamp(value: string | null): string {
+  return value ? new Date(value).toLocaleString() : 'not recorded';
 }
 
 function orgUnitLabel(units: OrgUnit[], id: string): string {
@@ -1297,9 +1305,10 @@ export function App() {
         </form>
         <article className="panel-card"><h3>My requests</h3>{myRequests.length === 0 ? <p className="muted">No leave requests yet.</p> : null}<div className="catalog-list">
           {myRequests.map((request) => <div className="policy-card" key={request.id}>
-            <strong>{request.leaveTypeCode ?? request.leaveTypeId} · {request.status}</strong>
+            <strong>{request.leaveTypeCode ?? request.leaveTypeId} <span className={`badge ${statusBadgeClass(request.status)}`}>{request.status}</span></strong>
             <span>{request.orgUnitCode ?? request.orgUnitId} · {request.startDate} → {request.endDate} · {request.dayPortion}</span>
-            <span>Calculated: {request.calculatedDays ?? 'pending'} · Policy version: {request.leavePolicyVersionId ?? 'not frozen'}</span>
+            <span>Leave type: {request.leaveTypeName ?? request.leaveTypeCode ?? request.leaveTypeId} · Calculated days: {request.calculatedDays ?? 'pending'} · Policy version: {request.leavePolicyVersionId ?? 'not frozen'}</span>
+            {request.status === 'COMPLETED' ? <span>Completed: {formatTimestamp(request.completedAtUtc)}</span> : null}
             <span>{request.comment ?? 'No comment'}</span>
             <span>Created by: {request.createdByUserDisplayName ?? request.createdByUserId}</span>
             {request.decision ? <span>Decision: {request.decision.decision} by {request.decision.decidedByUserDisplayName ?? request.decision.decidedByUserId} on {new Date(request.decision.createdAtUtc).toLocaleString()}{request.decision.comment ? ` · ${request.decision.comment}` : ''}</span> : null}
@@ -1314,10 +1323,10 @@ export function App() {
                 </button>
               ))}
             </div>
-            <form className="catalog-form inline-form" onSubmit={(event) => uploadMedicalCertificate(event, request.id)}>
+            {request.status !== 'COMPLETED' ? <form className="catalog-form inline-form" onSubmit={(event) => uploadMedicalCertificate(event, request.id)}>
               <input name="file" type="file" accept="application/pdf,image/jpeg,image/png" required />
               <button type="submit" disabled={uploadingDocumentRequestId === request.id}>Upload medical certificate</button>
-            </form>
+            </form> : null}
 
             {request.status === 'DRAFT' ? <details><summary>Edit draft</summary><form className="catalog-form inline-form" onSubmit={(event) => updateLeaveRequest(event, request.id)}>
               <select name="leaveTypeId" required defaultValue={request.leaveTypeId}>{leaveTypes.map((type) => <option key={type.id} value={type.id}>{type.code}</option>)}</select>
@@ -1367,7 +1376,7 @@ export function App() {
             </div> : <p className="muted">Own request: cancellation decision controls hidden.</p>}
           </div>)}
         </div></article>
-        {scopedRequests.length > 0 ? <article className="panel-card"><h3>Scoped request inspector</h3><div className="catalog-list">{scopedRequests.map((request) => <div className="version-row" key={request.id}><span>{request.userDisplayName ?? request.userId}</span><span>{request.leaveTypeCode}</span><span>{request.orgUnitCode}</span><span>{request.startDate} → {request.endDate}</span><span>{request.status}</span>{request.decision ? <span>{request.decision.decision} · {request.decision.comment ?? 'No decision comment'}</span> : null}{request.cancellation ? <span>Cancellation: {request.cancellation.reason}</span> : null}{request.revocation ? <span>Revocation: {request.revocation.reason}</span> : null}{request.documents.length > 0 ? <span>Documents: {request.documents.map((document) => <button type="button" key={document.id} onClick={() => void downloadLeaveRequestDocument(document)}>{document.originalFileName}</button>)}</span> : <span className="muted">No documents</span>}{request.status === 'APPROVED' && request.userId !== selectedActorId ? <form className="catalog-form inline-form" onSubmit={(event) => revokeLeaveRequest(event, request.id)}><input name="reason" placeholder="Revocation reason" required /><button type="submit" disabled={processingDecisionId === request.id}>Revoke</button></form> : null}</div>)}</div></article> : null}
+        {scopedRequests.length > 0 ? <article className="panel-card"><h3>Scoped request inspector</h3><div className="catalog-list">{scopedRequests.map((request) => <div className="version-row" key={request.id}><span>{request.userDisplayName ?? request.userId}</span><span>{request.leaveTypeCode}</span><span>{request.orgUnitCode}</span><span>{request.startDate} → {request.endDate}</span><span className={`badge ${statusBadgeClass(request.status)}`}>{request.status}</span><span>Calculated days: {request.calculatedDays ?? 'pending'} · Leave type: {request.leaveTypeName ?? request.leaveTypeCode ?? request.leaveTypeId}</span>{request.status === 'COMPLETED' ? <span>Completed: {formatTimestamp(request.completedAtUtc)}</span> : null}{request.decision ? <span>{request.decision.decision} · {request.decision.comment ?? 'No decision comment'}</span> : null}{request.cancellation ? <span>Cancellation: {request.cancellation.reason}</span> : null}{request.revocation ? <span>Revocation: {request.revocation.reason}</span> : null}{request.documents.length > 0 ? <span>Documents: {request.documents.map((document) => <button type="button" key={document.id} onClick={() => void downloadLeaveRequestDocument(document)}>{document.originalFileName}</button>)}</span> : <span className="muted">No documents</span>}{request.status === 'APPROVED' && request.userId !== selectedActorId ? <form className="catalog-form inline-form" onSubmit={(event) => revokeLeaveRequest(event, request.id)}><input name="reason" placeholder="Revocation reason" required /><button type="submit" disabled={processingDecisionId === request.id}>Revoke</button></form> : null}</div>)}</div></article> : null}
       </section>
 
       <section className="admin-panel" aria-label="Balance ledger">

@@ -20,7 +20,7 @@ public interface IPrivateDocumentStorage
 public sealed record LeaveRequestDecisionDto(Guid Id, Guid LeaveRequestId, string Decision, Guid DecidedByUserId, string? DecidedByUserDisplayName, string? Comment, Guid OperationId, Guid? BalanceSettlementOperationId, DateTime CreatedAtUtc);
 public sealed record LeaveRequestCancellationDto(Guid Id, Guid LeaveRequestId, Guid RequestedByUserId, string? RequestedByUserDisplayName, string Reason, Guid OperationId, DateTime RequestedAtUtc, string? Decision, Guid? DecidedByUserId, string? DecidedByUserDisplayName, string? DecisionComment, Guid? DecisionOperationId, Guid? BalanceSettlementOperationId, DateTime? DecidedAtUtc);
 public sealed record LeaveRequestRevocationDto(Guid Id, Guid LeaveRequestId, Guid RevokedByUserId, string? RevokedByUserDisplayName, string Reason, Guid OperationId, Guid? BalanceSettlementOperationId, DateTime CreatedAtUtc);
-public sealed record LeaveRequestDto(Guid Id, Guid UserId, string? UserDisplayName, Guid OrgUnitId, string? OrgUnitCode, string? OrgUnitName, Guid LeaveTypeId, string? LeaveTypeCode, string? LeaveTypeName, Guid? LeavePolicyVersionId, DateOnly StartDate, DateOnly EndDate, string DayPortion, decimal? CalculatedDays, string Status, string? Comment, Guid? BalanceAccountId, Guid? BalanceReservationOperationId, Guid? SubmissionOperationId, Guid CreatedByUserId, string? CreatedByUserDisplayName, DateTime CreatedAtUtc, DateTime UpdatedAtUtc, DateTime? SubmittedAtUtc, DateTime? DecidedAtUtc, DateTime? CancellationRequestedAtUtc, DateTime? CancellationDecidedAtUtc, DateTime? RevokedAtUtc, LeaveRequestDecisionDto? Decision, LeaveRequestCancellationDto? Cancellation, LeaveRequestRevocationDto? Revocation, IReadOnlyList<LeaveRequestDocumentDto> Documents);
+public sealed record LeaveRequestDto(Guid Id, Guid UserId, string? UserDisplayName, Guid OrgUnitId, string? OrgUnitCode, string? OrgUnitName, Guid LeaveTypeId, string? LeaveTypeCode, string? LeaveTypeName, Guid? LeavePolicyVersionId, DateOnly StartDate, DateOnly EndDate, string DayPortion, decimal? CalculatedDays, string Status, string? Comment, Guid? BalanceAccountId, Guid? BalanceReservationOperationId, Guid? SubmissionOperationId, Guid CreatedByUserId, string? CreatedByUserDisplayName, DateTime CreatedAtUtc, DateTime UpdatedAtUtc, DateTime? SubmittedAtUtc, DateTime? DecidedAtUtc, DateTime? CancellationRequestedAtUtc, DateTime? CancellationDecidedAtUtc, DateTime? RevokedAtUtc, DateTime? CompletedAtUtc, LeaveRequestDecisionDto? Decision, LeaveRequestCancellationDto? Cancellation, LeaveRequestRevocationDto? Revocation, IReadOnlyList<LeaveRequestDocumentDto> Documents);
 public sealed record CreateLeaveRequestCommand(Guid OrgUnitId, Guid LeaveTypeId, DateOnly StartDate, DateOnly EndDate, string DayPortion, string? Comment);
 public sealed record CreateLeaveRequestForUserCommand(Guid OrgUnitId, Guid LeaveTypeId, DateOnly StartDate, DateOnly EndDate, string DayPortion, string? Comment, Guid SubmissionOperationId);
 public sealed record UpdateLeaveRequestCommand(Guid OrgUnitId, Guid LeaveTypeId, DateOnly StartDate, DateOnly EndDate, string DayPortion, string? Comment);
@@ -33,6 +33,7 @@ public sealed record DecideCancellationCommand(Guid OperationId, string? Comment
 public sealed record DecideCancellationResultDto(LeaveRequestDto Request, LeaveRequestCancellationDto Cancellation, bool WasAlreadyApplied);
 public sealed record RevokeLeaveRequestCommand(Guid OperationId, string Reason);
 public sealed record RevokeLeaveRequestResultDto(LeaveRequestDto Request, LeaveRequestRevocationDto Revocation, bool WasAlreadyApplied);
+public sealed record CompleteEligibleLeaveRequestsResultDto(DateOnly BusinessToday, int RequestedBatchSize, int ScannedCount, int CompletedCount, int SkippedCount, IReadOnlyList<Guid> CompletedRequestIds);
 
 public interface ILeaveRequestRepository
 {
@@ -40,6 +41,7 @@ public interface ILeaveRequestRepository
     Task<IReadOnlyList<LeaveRequest>> ListByUsersAsync(IReadOnlyCollection<Guid> userIds, CancellationToken cancellationToken);
     Task<IReadOnlyList<LeaveRequest>> ListPendingByOrgUnitsAsync(IReadOnlyCollection<Guid> orgUnitIds, CancellationToken cancellationToken);
     Task<IReadOnlyList<LeaveRequest>> ListPendingCancellationByOrgUnitsAsync(IReadOnlyCollection<Guid> orgUnitIds, CancellationToken cancellationToken);
+    Task<IReadOnlyList<LeaveRequest>> ListEligibleApprovedForCompletionAsync(DateOnly businessToday, int limit, CancellationToken cancellationToken);
     Task<LeaveRequest?> GetAsync(Guid id, bool tracking, CancellationToken cancellationToken);
     Task<LeaveRequest?> GetForUpdateAsync(Guid id, CancellationToken cancellationToken);
     Task<LeaveRequest?> GetBySubmissionOperationIdAsync(Guid operationId, bool tracking, CancellationToken cancellationToken);

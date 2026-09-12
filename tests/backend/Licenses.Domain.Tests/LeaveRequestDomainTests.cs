@@ -127,6 +127,55 @@ public sealed class LeaveRequestDomainTests
     }
 
     [Fact]
+    public void ApprovedRequestCompletesOnlyAfterBusinessEndDateAndFreezesFacts()
+    {
+        var request = Submitted();
+        request.Approve(DateTime.UtcNow);
+        var policyVersionId = request.LeavePolicyVersionId;
+        var calculatedDays = request.CalculatedDays;
+        var startDate = request.StartDate;
+        var endDate = request.EndDate;
+        var completedAt = new DateTime(2026, 9, 16, 12, 0, 0, DateTimeKind.Utc);
+
+        Assert.False(request.IsEligibleForCompletion(endDate));
+        Assert.False(request.Complete(endDate, completedAt));
+        Assert.Equal(LeaveRequestStatus.Approved, request.Status);
+
+        Assert.True(request.Complete(endDate.AddDays(1), completedAt));
+        Assert.Equal(LeaveRequestStatus.Completed, request.Status);
+        Assert.Equal(completedAt, request.CompletedAtUtc);
+        Assert.Equal(policyVersionId, request.LeavePolicyVersionId);
+        Assert.Equal(calculatedDays, request.CalculatedDays);
+        Assert.Equal(startDate, request.StartDate);
+        Assert.Equal(endDate, request.EndDate);
+    }
+
+    [Fact]
+    public void NonApprovedRequestsAreNotCompleted()
+    {
+        var businessToday = new DateOnly(2026, 9, 16);
+        var completedAt = new DateTime(2026, 9, 16, 12, 0, 0, DateTimeKind.Utc);
+
+        var statuses = new[]
+        {
+            LeaveRequestStatus.Draft,
+            LeaveRequestStatus.PendingApproval,
+            LeaveRequestStatus.Rejected,
+            LeaveRequestStatus.CancellationRequested,
+            LeaveRequestStatus.Cancelled,
+            LeaveRequestStatus.Revoked,
+            LeaveRequestStatus.Completed
+        };
+
+        foreach (var status in statuses)
+        {
+            var request = RequestWithStatus(status);
+            Assert.False(request.Complete(businessToday, completedAt));
+            Assert.Equal(status, request.Status);
+        }
+    }
+
+    [Fact]
     public void CancellationAndRevocationHistoryRequireReasons()
     {
         Assert.Throws<ArgumentException>(() => LeaveRequestCancellation.Create(Guid.NewGuid(), Guid.NewGuid(), " ", Guid.NewGuid(), DateTime.UtcNow));
@@ -144,5 +193,42 @@ public sealed class LeaveRequestDomainTests
         var request = LeaveRequest.CreateDraft(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 1), LeaveRequestDayPortion.FullDay, comment, Guid.NewGuid(), DateTime.UtcNow);
         request.Submit(Guid.NewGuid(), 1m, null, null, DateTime.UtcNow);
         return request;
+    }
+
+    private static LeaveRequest RequestWithStatus(LeaveRequestStatus status)
+    {
+        var request = Submitted();
+        switch (status)
+        {
+            case LeaveRequestStatus.Draft:
+                return Draft();
+            case LeaveRequestStatus.PendingApproval:
+                return request;
+            case LeaveRequestStatus.Approved:
+                request.Approve(DateTime.UtcNow);
+                return request;
+            case LeaveRequestStatus.Rejected:
+                request.Reject(DateTime.UtcNow);
+                return request;
+            case LeaveRequestStatus.CancellationRequested:
+                request.Approve(DateTime.UtcNow);
+                request.RequestCancellation(DateTime.UtcNow);
+                return request;
+            case LeaveRequestStatus.Cancelled:
+                request.Approve(DateTime.UtcNow);
+                request.RequestCancellation(DateTime.UtcNow);
+                request.ApproveCancellation(DateTime.UtcNow);
+                return request;
+            case LeaveRequestStatus.Revoked:
+                request.Approve(DateTime.UtcNow);
+                request.Revoke(DateTime.UtcNow);
+                return request;
+            case LeaveRequestStatus.Completed:
+                request.Approve(DateTime.UtcNow);
+                request.Complete(new DateOnly(2026, 9, 2), DateTime.UtcNow);
+                return request;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(status));
+        }
     }
 }

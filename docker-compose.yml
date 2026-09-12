@@ -44,6 +44,10 @@ services:
     environment:
       DOTNET_ENVIRONMENT: Development
       ConnectionStrings__ApplicationDb: Host=postgres;Port=5432;Database=${POSTGRES_DB:-licenses};Username=${POSTGRES_USER:-licenses};Password=${POSTGRES_PASSWORD:-change-me}
+      BusinessTime__TimeZoneId: America/Montevideo
+      LeaveCompletion__Enabled: "true"
+      LeaveCompletion__PollInterval: "00:10:00"
+      LeaveCompletion__BatchSize: "50"
     depends_on:
       postgres:
         condition: service_healthy
