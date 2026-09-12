@@ -29,6 +29,7 @@ type AuditFilters = { action: string; resourceType: string; fromUtc: string; toU
 type Role = { id: string; code: string; name: string; description: string; isActive: boolean };
 type UserOrgAssignment = { id: string; userId: string; orgUnitId: string; orgUnitName: string; isPrimary: boolean; effectiveFromUtc: string; effectiveToUtc: string | null };
 type RoleScopeAssignment = { id: string; userId: string; roleId: string; roleCode: string; orgUnitId: string; includeDescendants: boolean; effectiveFromUtc: string; effectiveToUtc: string | null };
+type ApiErrorPayload = { error?: string; title?: string; detail?: string; code?: string; minimumNoticeDays?: number; calculatedNoticeDays?: number | null; noticeDayCountMode?: string; businessToday?: string | null; startDate?: string | null };
 
 type StatusCardProps = { label: string; status: HealthStatus };
 type CatalogKind = 'leave-types' | 'balance-buckets';
@@ -42,6 +43,12 @@ function developmentHeaders(actorId: string | null): HeadersInit {
   return isDevelopment && actorId ? { 'X-Dev-User-Id': actorId } : {};
 }
 
+class ApiError extends Error {
+  constructor(message: string, public readonly status: number, public readonly payload: ApiErrorPayload | null) {
+    super(message);
+  }
+}
+
 async function fetchHealth(path: string): Promise<HealthStatus> {
   try {
     const response = await fetch(`${endpointPrefix}${path}`);
@@ -53,35 +60,52 @@ async function fetchHealth(path: string): Promise<HealthStatus> {
   }
 }
 
-async function readApiError(response: Response): Promise<string> {
+function formatApiError(payload: ApiErrorPayload, fallback: string): string {
+  if (payload.code === 'INSUFFICIENT_MINIMUM_NOTICE' && typeof payload.minimumNoticeDays === 'number') {
+    const mode = payload.noticeDayCountMode === 'BUSINESS_DAYS' ? 'business days' : 'calendar days';
+    const provided = typeof payload.calculatedNoticeDays === 'number'
+      ? ` Your request currently provides ${payload.calculatedNoticeDays}.`
+      : '';
+    const businessDate = payload.businessToday ? ` Based on business date ${payload.businessToday}.` : '';
+    return `This leave type requires at least ${payload.minimumNoticeDays} ${mode} of notice.${provided}${businessDate}`;
+  }
+
+  if (payload.code === 'MINIMUM_NOTICE_CALCULATION_FAILED') {
+    return 'Minimum notice could not be validated for this leave request. Please review the selected dates and try again.';
+  }
+
+  return payload.error ?? payload.detail ?? payload.title ?? fallback;
+}
+
+async function readApiFailure(response: Response): Promise<ApiError> {
   const fallback = response.status === 403
     ? 'You do not have authority for this scope or operation.'
     : response.status === 404
       ? 'The requested user, role, or org unit was not found or is outside your scope.'
       : `Request failed: ${response.status}`;
   try {
-    const payload = await response.json() as { error?: string; title?: string; detail?: string };
-    return payload.error ?? payload.detail ?? payload.title ?? fallback;
+    const payload = await response.json() as ApiErrorPayload;
+    return new ApiError(formatApiError(payload, fallback), response.status, payload);
   } catch {
-    return fallback;
+    return new ApiError(fallback, response.status, null);
   }
 }
 
 async function fetchJson<T>(path: string, actorId: string | null = null): Promise<T> {
   const response = await fetch(`${endpointPrefix}${path}`, { headers: developmentHeaders(actorId) });
-  if (!response.ok) throw new Error(await readApiError(response));
+  if (!response.ok) throw await readApiFailure(response);
   return (await response.json()) as T;
 }
 
 async function sendMultipart<T>(path: string, body: FormData, actorId: string | null): Promise<T> {
   const response = await fetch(`${endpointPrefix}${path}`, { method: 'POST', headers: developmentHeaders(actorId), body });
-  if (!response.ok) throw new Error(await readApiError(response));
+  if (!response.ok) throw await readApiFailure(response);
   return (await response.json()) as T;
 }
 
 async function downloadDocument(documentId: string, fileName: string, actorId: string | null): Promise<void> {
   const response = await fetch(`${endpointPrefix}/leave-request-documents/${documentId}/content`, { headers: developmentHeaders(actorId) });
-  if (!response.ok) throw new Error(await readApiError(response));
+  if (!response.ok) throw await readApiFailure(response);
   const blob = await response.blob();
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
@@ -97,7 +121,7 @@ async function sendJson<T>(path: string, method: 'POST' | 'PUT', body: unknown, 
     headers: { 'Content-Type': 'application/json', ...developmentHeaders(actorId) },
     body: JSON.stringify(body),
   });
-  if (!response.ok) throw new Error(await readApiError(response));
+  if (!response.ok) throw await readApiFailure(response);
   return (await response.json()) as T;
 }
 
@@ -197,6 +221,7 @@ export function App() {
   const [pendingCancellations, setPendingCancellations] = useState<LeaveRequest[]>([]);
   const [processingDecisionId, setProcessingDecisionId] = useState<string | null>(null);
   const [requestMessage, setRequestMessage] = useState<string | null>(null);
+  const [isRequestMessageError, setIsRequestMessageError] = useState(false);
   const [isRequestSubmitting, setIsRequestSubmitting] = useState(false);
   const [uploadingDocumentRequestId, setUploadingDocumentRequestId] = useState<string | null>(null);
   const [auditEvents, setAuditEvents] = useState<AuditEventListResult | null>(null);
@@ -864,8 +889,10 @@ export function App() {
       await sendMultipart<LeaveRequestDocument>(`/leave-requests/${requestId}/documents`, payload, selectedActorId);
       event.currentTarget.reset();
       await loadLeaveRequests(selectedActorId);
+      setIsRequestMessageError(false);
       setRequestMessage('Medical certificate uploaded.');
     } catch (error) {
+      setIsRequestMessageError(true);
       setRequestMessage(error instanceof Error ? error.message : 'Unable to upload medical certificate.');
     } finally {
       setUploadingDocumentRequestId(null);
@@ -876,6 +903,7 @@ export function App() {
     try {
       await downloadDocument(document.id, document.originalFileName, selectedActorId);
     } catch (error) {
+      setIsRequestMessageError(true);
       setRequestMessage(error instanceof Error ? error.message : 'Unable to download document.');
     }
   }
@@ -887,8 +915,12 @@ export function App() {
       await sendJson<LeaveRequest>('/leave-requests', 'POST', { orgUnitId: data.get('orgUnitId'), leaveTypeId: data.get('leaveTypeId'), startDate: data.get('startDate'), endDate: data.get('endDate'), dayPortion: data.get('dayPortion'), comment: data.get('comment') || null }, selectedActorId);
       event.currentTarget.reset();
       await loadLeaveRequests(selectedActorId);
+      setIsRequestMessageError(false);
       setRequestMessage('Draft request saved.');
-    } catch (error) { setRequestMessage(error instanceof Error ? error.message : 'Unable to save leave request.'); }
+    } catch (error) {
+      setIsRequestMessageError(true);
+      setRequestMessage(error instanceof Error ? error.message : 'Unable to save leave request.');
+    }
   }
 
   async function updateLeaveRequest(event: FormEvent<HTMLFormElement>, requestId: string) {
@@ -897,8 +929,12 @@ export function App() {
     try {
       await sendJson<LeaveRequest>(`/leave-requests/${requestId}`, 'PUT', { orgUnitId: data.get('orgUnitId'), leaveTypeId: data.get('leaveTypeId'), startDate: data.get('startDate'), endDate: data.get('endDate'), dayPortion: data.get('dayPortion'), comment: data.get('comment') || null }, selectedActorId);
       await loadLeaveRequests(selectedActorId);
+      setIsRequestMessageError(false);
       setRequestMessage('Draft request updated.');
-    } catch (error) { setRequestMessage(error instanceof Error ? error.message : 'Unable to update leave request.'); }
+    } catch (error) {
+      setIsRequestMessageError(true);
+      setRequestMessage(error instanceof Error ? error.message : 'Unable to update leave request.');
+    }
   }
 
   async function submitLeaveRequest(requestId: string) {
@@ -907,8 +943,12 @@ export function App() {
       const result = await sendJson<SubmitLeaveRequestResult>(`/leave-requests/${requestId}/submit`, 'POST', {}, selectedActorId);
       await loadLeaveRequests(selectedActorId);
       await loadMyBalances(selectedActorId);
+      setIsRequestMessageError(false);
       setRequestMessage(`Submitted: ${result.request.calculatedDays ?? '-'} days${result.warnings.length ? ` · ${result.warnings.join(' · ')}` : ''}`);
-    } catch (error) { setRequestMessage(error instanceof Error ? error.message : 'Unable to submit leave request.'); }
+    } catch (error) {
+      setIsRequestMessageError(true);
+      setRequestMessage(error instanceof Error ? error.message : 'Unable to submit leave request.');
+    }
     finally { setIsRequestSubmitting(false); }
   }
 
@@ -919,8 +959,10 @@ export function App() {
       setProcessingDecisionId(requestId);
       await sendJson(`/leave-requests/${requestId}/request-cancellation`, 'POST', { operationId: crypto.randomUUID(), reason: data.get('reason') }, selectedActorId);
       await loadLeaveRequests(selectedActorId);
+      setIsRequestMessageError(false);
       setRequestMessage('Cancellation requested.');
     } catch (error) {
+      setIsRequestMessageError(true);
       setRequestMessage(error instanceof Error ? error.message : 'Unable to request cancellation.');
     } finally { setProcessingDecisionId(null); }
   }
@@ -933,8 +975,10 @@ export function App() {
       await sendJson(`/leave-requests/${requestId}/${decision}-cancellation`, 'POST', { operationId: crypto.randomUUID(), comment: data.get('comment') || null }, selectedActorId);
       await loadLeaveRequests(selectedActorId);
       await loadMyBalances(selectedActorId);
+      setIsRequestMessageError(false);
       setRequestMessage(`Cancellation ${decision === 'approve' ? 'approved' : 'rejected'}.`);
     } catch (error) {
+      setIsRequestMessageError(true);
       setRequestMessage(error instanceof Error ? error.message : `Unable to ${decision} cancellation.`);
     } finally { setProcessingDecisionId(null); }
   }
@@ -947,8 +991,10 @@ export function App() {
       await sendJson(`/leave-requests/${requestId}/revoke`, 'POST', { operationId: crypto.randomUUID(), reason: data.get('reason') }, selectedActorId);
       await loadLeaveRequests(selectedActorId);
       await loadMyBalances(selectedActorId);
+      setIsRequestMessageError(false);
       setRequestMessage('Request revoked.');
     } catch (error) {
+      setIsRequestMessageError(true);
       setRequestMessage(error instanceof Error ? error.message : 'Unable to revoke request.');
     } finally { setProcessingDecisionId(null); }
   }
@@ -962,8 +1008,10 @@ export function App() {
       event.currentTarget.reset();
       await loadLeaveRequests(selectedActorId);
       await loadMyBalances(selectedActorId);
+      setIsRequestMessageError(false);
       setRequestMessage(`Manual request created as ${result.request.status}.`);
     } catch (error) {
+      setIsRequestMessageError(true);
       setRequestMessage(error instanceof Error ? error.message : 'Unable to create request for employee.');
     }
   }
@@ -977,8 +1025,10 @@ export function App() {
       await sendJson(`/leave-requests/${requestId}/${decision}`, 'POST', { operationId, comment: data.get('comment') || null }, selectedActorId);
       await loadLeaveRequests(selectedActorId);
       await loadMyBalances(selectedActorId);
+      setIsRequestMessageError(false);
       setRequestMessage(`Request ${decision === 'approve' ? 'approved' : 'rejected'}.`);
     } catch (error) {
+      setIsRequestMessageError(true);
       setRequestMessage(error instanceof Error ? error.message : `Unable to ${decision} request.`);
     } finally {
       setProcessingDecisionId(null);
@@ -1222,7 +1272,7 @@ export function App() {
           <p className="eyebrow">Leave requests</p>
           <h2>My requests</h2>
           <p className="muted">Drafts have no ledger side effects. Submission freezes policy version and calculated quantity.</p>
-          {requestMessage ? <p className={requestMessage.includes('failed') || requestMessage.includes('403') || requestMessage.includes('401') ? 'error' : 'muted'}>{requestMessage}</p> : null}
+          {requestMessage ? <p className={isRequestMessageError ? 'error' : 'muted'}>{requestMessage}</p> : null}
         </div>
         <form className="panel-card catalog-form" onSubmit={createLeaveRequest}>
           <h3>Create draft</h3>

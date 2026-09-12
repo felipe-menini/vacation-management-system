@@ -1,3 +1,4 @@
+using Licenses.Application.Common;
 using Licenses.Application.Audit;
 using Licenses.Application.Authorization;
 using Licenses.Application.LeaveManagement;
@@ -76,6 +77,112 @@ public sealed class LeaveRequestApprovalServiceTests
         Assert.Equal(setup.Unit.Id, ev.OrgUnitId);
         Assert.Single(setup.Audit.Events);
         Assert.Equal("leave.request.submit", setup.Audit.Events[0].Action);
+    }
+
+    [Theory]
+    [InlineData(0, 0, true)]
+    [InlineData(1, 0, false)]
+    [InlineData(1, 1, true)]
+    [InlineData(2, 1, false)]
+    [InlineData(2, 2, true)]
+    [InlineData(2, 3, true)]
+    public async Task SelfSubmissionEnforcesCalendarMinimumNotice(int minimumNoticeDays, int daysFromToday, bool succeeds)
+    {
+        var setup = TestSetup.CreateDraft(
+            consumesBalance: true,
+            minimumNoticeDays: minimumNoticeDays,
+            requestStartDate: new DateOnly(2026, 9, 11).AddDays(daysFromToday),
+            requestEndDate: new DateOnly(2026, 9, 11).AddDays(daysFromToday));
+        var service = setup.CreateService(setup.Employee.Id, PermissionCodes.LeaveRequestsCreateSelf);
+
+        if (succeeds)
+        {
+            var result = await service.SubmitAsync(setup.Request.Id, CancellationToken.None);
+            Assert.Equal("PENDING_APPROVAL", result!.Request.Status);
+            Assert.Equal(setup.Version.Id, result.Request.LeavePolicyVersionId);
+            Assert.Single(setup.Balances.Mutations);
+            Assert.Single(setup.Outbox.Messages);
+            Assert.Single(setup.Audit.Events);
+        }
+        else
+        {
+            var ex = await Assert.ThrowsAsync<MinimumNoticeValidationException>(() => service.SubmitAsync(setup.Request.Id, CancellationToken.None)!);
+            Assert.Equal("INSUFFICIENT_MINIMUM_NOTICE", ex.Code);
+            AssertFailureHasNoSubmissionSideEffects(setup);
+        }
+    }
+
+    [Fact]
+    public async Task BusinessDayNoticeExcludesWeekendAndHolidayButCountsWorkingException()
+    {
+        var calendar = StandardCalendar();
+        calendar.AddException(new DateOnly(2026, 9, 11), "Holiday", false, Now);
+        calendar.AddException(new DateOnly(2026, 9, 12), "Working Saturday", true, Now);
+        var setup = TestSetup.CreateDraft(
+            consumesBalance: false,
+            minimumNoticeDays: 1,
+            noticeMode: PolicyDayCountMode.BusinessDays,
+            workingCalendar: calendar,
+            requestStartDate: new DateOnly(2026, 9, 14),
+            requestEndDate: new DateOnly(2026, 9, 14));
+
+        var result = await setup.CreateService(setup.Employee.Id, PermissionCodes.LeaveRequestsCreateSelf).SubmitAsync(setup.Request.Id, CancellationToken.None);
+
+        Assert.Equal("PENDING_APPROVAL", result!.Request.Status);
+    }
+
+    [Fact]
+    public async Task BusinessDayNoticeRejectsInsufficientAndMissingCalendarFailsClearly()
+    {
+        var calendar = StandardCalendar();
+        var insufficient = TestSetup.CreateDraft(
+            consumesBalance: false,
+            minimumNoticeDays: 2,
+            noticeMode: PolicyDayCountMode.BusinessDays,
+            workingCalendar: calendar,
+            requestStartDate: new DateOnly(2026, 9, 14),
+            requestEndDate: new DateOnly(2026, 9, 14));
+
+        var ex = await Assert.ThrowsAsync<MinimumNoticeValidationException>(() => insufficient.CreateService(insufficient.Employee.Id, PermissionCodes.LeaveRequestsCreateSelf).SubmitAsync(insufficient.Request.Id, CancellationToken.None)!);
+        Assert.Equal("INSUFFICIENT_MINIMUM_NOTICE", ex.Code);
+        AssertFailureHasNoSubmissionSideEffects(insufficient);
+
+        var missing = TestSetup.CreateDraft(
+            consumesBalance: false,
+            minimumNoticeDays: 1,
+            noticeMode: PolicyDayCountMode.BusinessDays,
+            workingCalendar: calendar,
+            exposeCalendarToCalculator: false,
+            requestStartDate: new DateOnly(2026, 9, 14),
+            requestEndDate: new DateOnly(2026, 9, 14));
+
+        var config = await Assert.ThrowsAsync<MinimumNoticeValidationException>(() => missing.CreateService(missing.Employee.Id, PermissionCodes.LeaveRequestsCreateSelf).SubmitAsync(missing.Request.Id, CancellationToken.None)!);
+        Assert.Equal("MINIMUM_NOTICE_CALCULATION_FAILED", config.Code);
+        AssertFailureHasNoSubmissionSideEffects(missing);
+    }
+
+    [Fact]
+    public async Task SubmissionUsesBusinessLocalTodayAndPastStartDateFailsStably()
+    {
+        var boundary = TestSetup.CreateDraft(
+            consumesBalance: false,
+            minimumNoticeDays: 1,
+            utcNow: new DateTime(2026, 9, 11, 1, 30, 0, DateTimeKind.Utc),
+            requestStartDate: new DateOnly(2026, 9, 11),
+            requestEndDate: new DateOnly(2026, 9, 11));
+
+        var result = await boundary.CreateService(boundary.Employee.Id, PermissionCodes.LeaveRequestsCreateSelf).SubmitAsync(boundary.Request.Id, CancellationToken.None);
+        Assert.Equal("PENDING_APPROVAL", result!.Request.Status);
+
+        var past = TestSetup.CreateDraft(
+            consumesBalance: false,
+            minimumNoticeDays: 0,
+            requestStartDate: new DateOnly(2026, 9, 10),
+            requestEndDate: new DateOnly(2026, 9, 10));
+
+        var ex = await Assert.ThrowsAsync<MinimumNoticeValidationException>(() => past.CreateService(past.Employee.Id, PermissionCodes.LeaveRequestsCreateSelf).SubmitAsync(past.Request.Id, CancellationToken.None)!);
+        Assert.Equal("MINIMUM_NOTICE_CALCULATION_FAILED", ex.Code);
+        AssertFailureHasNoSubmissionSideEffects(past);
     }
     [Fact]
     public async Task SelfDecisionAndOperationIdConflictsAreRejected()
@@ -197,6 +304,47 @@ public sealed class LeaveRequestApprovalServiceTests
     }
 
     [Fact]
+    public async Task ManualCreateForOthersUsesMinimumNoticeWithoutPrivilegedBypass()
+    {
+        var insufficient = TestSetup.CreateDraft(consumesBalance: true, minimumNoticeDays: 2, requestStartDate: new DateOnly(2026, 9, 12), requestEndDate: new DateOnly(2026, 9, 12));
+        var service = insufficient.CreateService(insufficient.Approver.Id, PermissionCodes.LeaveRequestsCreateForOthers);
+        var rejected = new CreateLeaveRequestForUserCommand(insufficient.Unit.Id, insufficient.Type.Id, new DateOnly(2026, 9, 12), new DateOnly(2026, 9, 12), "FULL_DAY", "Manual", Guid.NewGuid());
+
+        var ex = await Assert.ThrowsAsync<MinimumNoticeValidationException>(() => service.CreateForUserAsync(insufficient.Employee.Id, rejected, CancellationToken.None));
+        Assert.Equal("INSUFFICIENT_MINIMUM_NOTICE", ex.Code);
+        Assert.Empty(insufficient.Balances.Mutations);
+        Assert.Empty(insufficient.Outbox.Messages);
+        Assert.Empty(insufficient.Audit.Events);
+
+        var sufficient = TestSetup.CreateDraft(consumesBalance: true, minimumNoticeDays: 2, requestStartDate: new DateOnly(2026, 9, 13), requestEndDate: new DateOnly(2026, 9, 13));
+        var command = new CreateLeaveRequestForUserCommand(sufficient.Unit.Id, sufficient.Type.Id, new DateOnly(2026, 9, 13), new DateOnly(2026, 9, 13), "FULL_DAY", "Manual", Guid.NewGuid());
+
+        var result = await sufficient.CreateService(sufficient.Approver.Id, PermissionCodes.LeaveRequestsCreateForOthers).CreateForUserAsync(sufficient.Employee.Id, command, CancellationToken.None);
+
+        Assert.Equal("PENDING_APPROVAL", result.Request.Status);
+        Assert.Single(sufficient.Balances.Mutations);
+        Assert.Single(sufficient.Outbox.Messages);
+        Assert.Single(sufficient.Audit.Events);
+    }
+
+    [Fact]
+    public async Task CorrectingDraftAfterFailedNoticeAllowsLaterValidSubmission()
+    {
+        var setup = TestSetup.CreateDraft(consumesBalance: false, minimumNoticeDays: 2, requestStartDate: new DateOnly(2026, 9, 12), requestEndDate: new DateOnly(2026, 9, 12));
+        var service = setup.CreateService(setup.Employee.Id, PermissionCodes.LeaveRequestsCreateSelf);
+
+        await Assert.ThrowsAsync<MinimumNoticeValidationException>(() => service.SubmitAsync(setup.Request.Id, CancellationToken.None)!);
+        await service.UpdateDraftAsync(setup.Request.Id, new(setup.Unit.Id, setup.Type.Id, new DateOnly(2026, 9, 13), new DateOnly(2026, 9, 13), "FULL_DAY", "Corrected"), CancellationToken.None);
+        var result = await service.SubmitAsync(setup.Request.Id, CancellationToken.None);
+        var retry = await service.SubmitAsync(setup.Request.Id, CancellationToken.None);
+
+        Assert.Equal("PENDING_APPROVAL", result!.Request.Status);
+        Assert.True(retry!.WasAlreadySubmitted);
+        Assert.Single(setup.Outbox.Messages);
+        Assert.Contains(setup.Audit.Events, x => x.Action == "leave.request.submit");
+    }
+
+    [Fact]
     public async Task CreateDraftAuditsCreateOnce()
     {
         var setup = TestSetup.CreateDraft(consumesBalance: false);
@@ -212,23 +360,44 @@ public sealed class LeaveRequestApprovalServiceTests
         Assert.Equal(setup.Employee.Id, setup.Audit.Events[0].SubjectUserId);
     }
 
-    private sealed record TestSetup(User Employee, User Approver, OrgUnit Unit, LeaveType Type, LeavePolicy Policy, LeavePolicyVersion Version, LeaveRequest Request, FakeLeaveRequestRepository Requests, FakeBalanceRepository Balances, FakeApplicationEventOutbox Outbox, FakeAuditWriter Audit)
+    private static void AssertFailureHasNoSubmissionSideEffects(TestSetup setup)
+    {
+        Assert.Equal(LeaveRequestStatus.Draft, setup.Request.Status);
+        Assert.Null(setup.Request.LeavePolicyVersionId);
+        Assert.Null(setup.Request.CalculatedDays);
+        Assert.Null(setup.Request.SubmittedAtUtc);
+        Assert.Empty(setup.Balances.Mutations);
+        Assert.Empty(setup.Outbox.Messages);
+        Assert.Empty(setup.Audit.Events);
+    }
+
+    private sealed record TestSetup(User Employee, User Approver, OrgUnit Unit, LeaveType Type, LeavePolicy Policy, LeavePolicyVersion Version, LeaveRequest Request, FakeLeaveRequestRepository Requests, FakeBalanceRepository Balances, FakeApplicationEventOutbox Outbox, FakeAuditWriter Audit, WorkingCalendar? WorkingCalendar, bool ExposeCalendarToCalculator, DateTime UtcNow)
     {
         public static TestSetup Create(bool consumesBalance) => CreateCore(consumesBalance, submitted: true);
 
-        public static TestSetup CreateDraft(bool consumesBalance) => CreateCore(consumesBalance, submitted: false);
+        public static TestSetup CreateDraft(
+            bool consumesBalance,
+            int? minimumNoticeDays = null,
+            PolicyDayCountMode noticeMode = PolicyDayCountMode.CalendarDays,
+            WorkingCalendar? workingCalendar = null,
+            bool exposeCalendarToCalculator = true,
+            DateTime? utcNow = null,
+            DateOnly? requestStartDate = null,
+            DateOnly? requestEndDate = null) =>
+            CreateCore(consumesBalance, submitted: false, minimumNoticeDays, noticeMode, workingCalendar, exposeCalendarToCalculator, utcNow, requestStartDate, requestEndDate);
 
-        private static TestSetup CreateCore(bool consumesBalance, bool submitted)
+        private static TestSetup CreateCore(bool consumesBalance, bool submitted, int? minimumNoticeDays = null, PolicyDayCountMode noticeMode = PolicyDayCountMode.CalendarDays, WorkingCalendar? workingCalendar = null, bool exposeCalendarToCalculator = true, DateTime? utcNow = null, DateOnly? requestStartDate = null, DateOnly? requestEndDate = null)
         {
+            var now = utcNow ?? Now;
             var employee = User.Create("Employee", $"employee.{Guid.NewGuid():N}@example.test", null, Now);
             var approver = User.Create("Approver", $"approver.{Guid.NewGuid():N}@example.test", null, Now);
             var unit = OrgUnit.Create("Engineering", "ENG" + Guid.NewGuid().ToString("N")[..8], null, Now);
             var type = LeaveType.Create("VAC" + Guid.NewGuid().ToString("N")[..8], "Vacation", null, 1, true, Now);
             var bucketId = consumesBalance ? Guid.NewGuid() : (Guid?)null;
             var policy = LeavePolicy.Create(type.Id, null, false, true, Now);
-            var version = LeavePolicyVersion.CreateDraft(policy.Id, 1, new DateOnly(2026, 1, 1), null, PolicyDayCountMode.CalendarDays, true, null, PolicyDayCountMode.CalendarDays, null, PolicyOverlapBehavior.Block, consumesBalance, bucketId, null, Now);
+            var version = LeavePolicyVersion.CreateDraft(policy.Id, 1, new DateOnly(2026, 1, 1), null, PolicyDayCountMode.CalendarDays, true, minimumNoticeDays, noticeMode, null, PolicyOverlapBehavior.Block, consumesBalance, bucketId, workingCalendar?.Id, Now);
             version.Publish(Now);
-            var request = LeaveRequest.CreateDraft(employee.Id, unit.Id, type.Id, new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 2), LeaveRequestDayPortion.FullDay, "Employee comment", employee.Id, Now);
+            var request = LeaveRequest.CreateDraft(employee.Id, unit.Id, type.Id, requestStartDate ?? new DateOnly(2026, 9, 1), requestEndDate ?? new DateOnly(2026, 9, 2), LeaveRequestDayPortion.FullDay, "Employee comment", employee.Id, Now);
             if (submitted)
             {
                 request.EnsureReservationOperationId();
@@ -238,14 +407,18 @@ public sealed class LeaveRequestApprovalServiceTests
             var requests = new FakeLeaveRequestRepository(employee, approver, unit, type, policy, version, request);
             var outbox = new FakeApplicationEventOutbox();
             var audit = new FakeAuditWriter();
-            return new(employee, approver, unit, type, policy, version, request, requests, balances, outbox, audit);
+            return new(employee, approver, unit, type, policy, version, request, requests, balances, outbox, audit, workingCalendar, exposeCalendarToCalculator, now);
         }
 
         public LeaveRequestService CreateService(Guid actorId, params string[] permissions)
         {
             var auth = new AuthorizationService(new FakeAuthorizationRepository(actorId, Unit, Employee, Approver, permissions), new FixedTimeProvider(Now));
             var balance = new BalanceService(Balances, auth, new FixedCurrentActor(actorId), new FixedTimeProvider(Now));
-            return new LeaveRequestService(Requests, new FakePolicyRepository(Policy, Version, Type, Unit), balance, auth, new FixedCurrentActor(actorId), new FixedTimeProvider(Now), Outbox, Audit);
+            IWorkingCalendarRepository workingCalendars = ExposeCalendarToCalculator && WorkingCalendar is not null
+                ? new FakeWorkingCalendarRepository(WorkingCalendar)
+                : new FakeWorkingCalendarRepository();
+            var noticeCalculator = new MinimumNoticeCalculator(new BusinessDateProvider(new FixedClock(UtcNow), TimeZoneInfo.FindSystemTimeZoneById("America/Montevideo")), workingCalendars);
+            return new LeaveRequestService(Requests, new FakePolicyRepository(Policy, Version, Type, Unit, WorkingCalendar), balance, auth, new FixedCurrentActor(actorId), new FixedTimeProvider(UtcNow), Outbox, Audit, noticeCalculator);
         }
     }
 
@@ -324,7 +497,7 @@ public sealed class LeaveRequestApprovalServiceTests
         public Task<List<DevelopmentActorDto>> ListDevelopmentActorsAsync(DateTime now, CancellationToken ct) => Task.FromResult(new List<DevelopmentActorDto>());
     }
 
-    private sealed class FakePolicyRepository(LeavePolicy policy, LeavePolicyVersion version, LeaveType type, OrgUnit unit) : ILeavePolicyRepository
+    private sealed class FakePolicyRepository(LeavePolicy policy, LeavePolicyVersion version, LeaveType type, OrgUnit unit, WorkingCalendar? workingCalendar) : ILeavePolicyRepository
     {
         public Task<List<LeavePolicy>> ListPoliciesAsync(CancellationToken ct) => Task.FromResult(new List<LeavePolicy>());
         public Task<LeavePolicy?> GetPolicyAsync(Guid id, CancellationToken ct) => Task.FromResult<LeavePolicy?>(null);
@@ -351,7 +524,7 @@ public sealed class LeaveRequestApprovalServiceTests
             typeof(BalanceBucket).GetProperty(nameof(BalanceBucket.Id))!.SetValue(bucket, id);
             return Task.FromResult<BalanceBucket?>(bucket);
         }
-        public Task<WorkingCalendar?> GetWorkingCalendarAsync(Guid id, CancellationToken ct) => Task.FromResult<WorkingCalendar?>(null);
+        public Task<WorkingCalendar?> GetWorkingCalendarAsync(Guid id, CancellationToken ct) => Task.FromResult(workingCalendar?.Id == id ? workingCalendar : null);
         public Task<OrgUnit?> GetOrgUnitAsync(Guid id, CancellationToken ct) => Task.FromResult<OrgUnit?>(id == unit.Id ? unit : null);
         public Task<List<OrgUnit>> ListOrgUnitsAsync(CancellationToken ct) => Task.FromResult(new List<OrgUnit> { unit });
         public Task SaveChangesAsync(CancellationToken ct) => Task.CompletedTask;
@@ -376,6 +549,35 @@ public sealed class LeaveRequestApprovalServiceTests
             Events.Add(auditEvent);
             return Task.CompletedTask;
         }
+    }
+
+    private static WorkingCalendar StandardCalendar() =>
+        WorkingCalendar.Create("STANDARD", "Standard", null, true, new Dictionary<DayOfWeek, bool>
+        {
+            [DayOfWeek.Sunday] = false,
+            [DayOfWeek.Monday] = true,
+            [DayOfWeek.Tuesday] = true,
+            [DayOfWeek.Wednesday] = true,
+            [DayOfWeek.Thursday] = true,
+            [DayOfWeek.Friday] = true,
+            [DayOfWeek.Saturday] = false
+        }, Now);
+
+    private sealed class FakeWorkingCalendarRepository(params WorkingCalendar[] calendars) : IWorkingCalendarRepository
+    {
+        public Task<List<WorkingCalendar>> ListCalendarsAsync(CancellationToken cancellationToken) => Task.FromResult(calendars.ToList());
+        public Task<WorkingCalendar?> GetCalendarAsync(Guid id, CancellationToken cancellationToken) => Task.FromResult(calendars.SingleOrDefault(x => x.Id == id));
+        public Task<WorkingCalendarException?> GetExceptionAsync(Guid id, CancellationToken cancellationToken) => Task.FromResult(calendars.SelectMany(x => x.Exceptions).SingleOrDefault(x => x.Id == id));
+        public Task<bool> CodeExistsAsync(string normalizedCode, Guid? excludingCalendarId, CancellationToken cancellationToken) => Task.FromResult(false);
+        public Task<bool> ExceptionDateExistsAsync(Guid calendarId, DateOnly date, Guid? excludingExceptionId, CancellationToken cancellationToken) => Task.FromResult(false);
+        public Task AddCalendarAsync(WorkingCalendar calendar, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task AddExceptionAsync(WorkingCalendarException exception, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task SaveChangesAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class FixedClock(DateTime utcNow) : IClock
+    {
+        public DateTimeOffset UtcNow { get; } = new(utcNow);
     }
 
     private sealed class FixedCurrentActor(Guid userId) : ICurrentActor { public Guid? UserId => userId; }
