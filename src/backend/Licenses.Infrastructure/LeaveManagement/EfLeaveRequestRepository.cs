@@ -35,6 +35,14 @@ public sealed class EfLeaveRequestRepository(ApplicationDbContext dbContext) : I
             .OrderBy(x => x.CancellationRequestedAtUtc)
             .ToListAsync(cancellationToken).ContinueWith(t => (IReadOnlyList<LeaveRequest>)t.Result, cancellationToken);
 
+    public Task<IReadOnlyList<LeaveRequest>> ListEligibleApprovedForCompletionAsync(DateOnly businessToday, int limit, CancellationToken cancellationToken) =>
+        dbContext.LeaveRequests.AsNoTracking()
+            .Where(x => x.Status == LeaveRequestStatus.Approved && x.EndDate < businessToday)
+            .OrderBy(x => x.EndDate)
+            .ThenBy(x => x.Id)
+            .Take(limit)
+            .ToListAsync(cancellationToken).ContinueWith(t => (IReadOnlyList<LeaveRequest>)t.Result, cancellationToken);
+
     public Task<LeaveRequest?> GetAsync(Guid id, bool tracking, CancellationToken cancellationToken)
     {
         var query = tracking ? dbContext.LeaveRequests : dbContext.LeaveRequests.AsNoTracking();

@@ -32,6 +32,7 @@ public sealed class LeaveRequestConfiguration : IEntityTypeConfiguration<LeaveRe
         builder.Property(x => x.CancellationRequestedAtUtc).HasColumnName("cancellation_requested_at_utc");
         builder.Property(x => x.CancellationDecidedAtUtc).HasColumnName("cancellation_decided_at_utc");
         builder.Property(x => x.RevokedAtUtc).HasColumnName("revoked_at_utc");
+        builder.Property(x => x.CompletedAtUtc).HasColumnName("completed_at_utc");
         builder.HasOne<Licenses.Domain.Identity.User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<Licenses.Domain.Identity.User>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<Licenses.Domain.Organization.OrgUnit>().WithMany().HasForeignKey(x => x.OrgUnitId).OnDelete(DeleteBehavior.Restrict);
@@ -40,6 +41,7 @@ public sealed class LeaveRequestConfiguration : IEntityTypeConfiguration<LeaveRe
         builder.HasOne<BalanceAccount>().WithMany().HasForeignKey(x => x.BalanceAccountId).OnDelete(DeleteBehavior.Restrict);
         builder.HasIndex(x => new { x.UserId, x.StartDate, x.EndDate, x.Status });
         builder.HasIndex(x => new { x.OrgUnitId, x.Status });
+        builder.HasIndex(x => new { x.Status, x.EndDate, x.Id });
         builder.HasIndex(x => x.LeaveTypeId);
         builder.HasIndex(x => x.LeavePolicyVersionId);
         builder.HasIndex(x => x.BalanceReservationOperationId).IsUnique().HasFilter("balance_reservation_operation_id IS NOT NULL");

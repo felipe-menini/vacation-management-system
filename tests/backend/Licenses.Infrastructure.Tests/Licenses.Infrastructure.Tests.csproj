@@ -21,6 +21,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\backend\Licenses.Infrastructure\Licenses.Infrastructure.csproj" />
     <ProjectReference Include="..\..\..\src\backend\Licenses.Domain\Licenses.Domain.csproj" />
+    <ProjectReference Include="..\..\..\src\backend\Licenses.Worker\Licenses.Worker.csproj" />
   </ItemGroup>
 
 </Project>

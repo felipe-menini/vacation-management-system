@@ -4,7 +4,7 @@ Leave requests represent an employee request for a leave type over business date
 
 ## Lifecycle
 
-Known statuses are DRAFT, PENDING_APPROVAL, APPROVED, REJECTED, CANCELLATION_REQUESTED, CANCELLED, REVOKED, and COMPLETED. EP-07 implements DRAFT -> PENDING_APPROVAL. EP-08 implements the final approval decisions PENDING_APPROVAL -> APPROVED and PENDING_APPROVAL -> REJECTED. EP-09 implements approved-request cancellation, cancellation approval/rejection, revocation, and manual create-for-others.
+Known statuses are DRAFT, PENDING_APPROVAL, APPROVED, REJECTED, CANCELLATION_REQUESTED, CANCELLED, REVOKED, and COMPLETED. EP-07 implements DRAFT -> PENDING_APPROVAL. EP-08 implements the final approval decisions PENDING_APPROVAL -> APPROVED and PENDING_APPROVAL -> REJECTED. EP-09 implements approved-request cancellation, cancellation approval/rejection, revocation, and manual create-for-others. EP-15 implements automatic APPROVED -> COMPLETED processing.
 
 A DRAFT may be edited by its owner. Once submitted, core request fields, the frozen policy version, calculated days, and balance reservation linkage are not editable through the draft update API.
 
@@ -49,6 +49,12 @@ EP-09 allows the owner of an `APPROVED` request to request cancellation. The req
 Administrative revocation moves an `APPROVED` request to `REVOKED`. The actor must be authorized for the request's stored organizational unit and cannot revoke their own request.
 
 Approved cancellation and revocation refund consuming leave with a `REFUND` ledger transaction based only on the frozen request values. Rejected cancellation does not mutate balance. Cancellation and revocation history records are immutable; they are not replaced or deleted.
+
+## Completion
+
+EP-15 defines `APPROVED -> COMPLETED` as a system lifecycle transition after the leave period has ended. A request is eligible only when the configured business-local date is greater than `EndDate`; on `EndDate` itself it remains `APPROVED`.
+
+Only `APPROVED` requests auto-complete. Requests in `CANCELLATION_REQUESTED` stay pending cancellation decision and are not silently resolved by completion. Completion records `CompletedAtUtc`, does not create balance ledger entries, and does not change frozen policy version, calculated days, or request dates. Completion is performed by the Worker with startup catch-up and bounded batches; there is no manual completion endpoint or frontend Complete button.
 
 ## Manual creation for others
 
