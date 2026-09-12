@@ -6,7 +6,7 @@ using Licenses.Domain.LeaveManagement;
 
 namespace Licenses.Application.LeaveManagement;
 
-public sealed class LeaveRequestService(ILeaveRequestRepository repository, ILeavePolicyRepository policyRepository, BalanceService balanceService, AuthorizationService authorization, ICurrentActor currentActor, TimeProvider timeProvider, IApplicationEventOutbox outbox, IAuditWriter auditWriter)
+public sealed class LeaveRequestService(ILeaveRequestRepository repository, ILeavePolicyRepository policyRepository, BalanceService balanceService, AuthorizationService authorization, ICurrentActor currentActor, TimeProvider timeProvider, IApplicationEventOutbox outbox, IAuditWriter auditWriter, IMinimumNoticeCalculator minimumNoticeCalculator)
 {
     private readonly DayCalculator _calculator = new();
 
@@ -148,6 +148,7 @@ public sealed class LeaveRequestService(ILeaveRequestRepository repository, ILea
         if (!resolved.Found || resolved.Version is null) throw new InvalidOperationException(resolved.Reason ?? "No published applicable policy exists.");
         var version = await repository.GetPolicyVersionAsync(resolved.Version.Id, cancellationToken) ?? throw new InvalidOperationException("Resolved policy version does not exist.");
 
+        await EnforceMinimumNoticeAsync(request, version, cancellationToken);
         var calculatedDays = await CalculateAsync(request, version, cancellationToken);
         if (version.MaximumRequestDays is not null && calculatedDays > version.MaximumRequestDays.Value) throw new InvalidOperationException("Requested days exceed the policy maximum.");
 
@@ -195,6 +196,24 @@ public sealed class LeaveRequestService(ILeaveRequestRepository repository, ILea
         await WriteLeaveRequestAuditAsync(auditAction, request, currentActor.UserId, submissionOperationId, auditMetadata, cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
         return new((await ToDtosAsync([request], cancellationToken)).Single(), warnings, WasAlreadySubmitted: false);
+    }
+
+    private async Task EnforceMinimumNoticeAsync(LeaveRequest request, LeavePolicyVersion version, CancellationToken cancellationToken)
+    {
+        if (version.MinimumNoticeDays is null) return;
+
+        MinimumNoticeCalculationResult notice;
+        try
+        {
+            notice = await minimumNoticeCalculator.CalculateAsync(new MinimumNoticeCalculationRequest(request.StartDate, version.NoticeDayCountMode, version.WorkingCalendarId), cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw MinimumNoticeValidationException.CalculationFailed(version.MinimumNoticeDays.Value, version.NoticeDayCountMode, request.StartDate, ex);
+        }
+
+        if (notice.NoticeDays < version.MinimumNoticeDays.Value)
+            throw MinimumNoticeValidationException.Insufficient(version.MinimumNoticeDays.Value, notice.NoticeDays, notice.NoticeDayCountMode, notice.BusinessToday);
     }
 
     public Task<DecideLeaveRequestResultDto?> ApproveAsync(Guid id, DecideLeaveRequestCommand command, CancellationToken cancellationToken) =>

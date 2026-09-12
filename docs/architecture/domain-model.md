@@ -80,6 +80,12 @@ EP-05 implements `WorkingCalendar` as the stable calendar selected by policy ver
 
 `LeavePolicyVersion.WorkingCalendarId` is required when `DayCountMode` or `NoticeDayCountMode` is `BUSINESS_DAYS`, and may be null when both modes are `CALENDAR_DAYS`. New publication rejects inactive calendars, while already-published historical versions remain readable if the referenced calendar is later deactivated.
 
+## Implemented business-time and notice foundation
+
+EP-14A defines a configured application business time zone (`BusinessTime:TimeZoneId`) used to derive business-local `DateOnly` values from UTC clock time. Persisted technical timestamps remain UTC.
+
+Minimum notice is calculated as the number of eligible days strictly before the leave `StartDate`, beginning from business-local today. Calendar notice uses date difference. Business-day notice reuses `WorkingCalendar` weekday and exception semantics, and requires the frozen policy's working calendar. MinimumNoticeDays is enforced during submission, while drafts may temporarily violate notice rules. Failed notice validation has no status, balance, audit, outbox, or approval-history side effects.
+
 ## Implemented balance account and ledger model
 
 EP-06 implements `BalanceAccount` as the stable grouping for one `User + BalanceBucket`. `BalanceLedgerEntry` is the immutable accounting record for `GRANT`, `RESERVE`, `RELEASE`, `CONSUME`, `REFUND`, `ADJUSTMENT`, and `EXPIRE`.

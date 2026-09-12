@@ -1,5 +1,6 @@
 using Licenses.Application.Audit;
 using Licenses.Application.Authorization;
+using Licenses.Application.Common;
 using Licenses.Application.Organization;
 using Licenses.Infrastructure.Health;
 using Licenses.Application.Notifications;
@@ -24,6 +25,7 @@ public static class DependencyInjection
         IConfiguration configuration)
     {
         var connectionString = configuration.GetConnectionString("ApplicationDb");
+        var businessTimeZone = ResolveBusinessTimeZone(configuration);
 
         services.AddDbContext<ApplicationDbContext>(options =>
         {
@@ -52,10 +54,36 @@ public static class DependencyInjection
         services.AddScoped<IAuthorizationRepository, EfAuthorizationRepository>();
         services.AddScoped<IAuthorizationAdminRepository, EfAuthorizationAdminRepository>();
         services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<IClock, SystemClock>();
+        services.AddSingleton(businessTimeZone);
+        services.AddScoped<IBusinessDateProvider, BusinessDateProvider>();
+        services.AddScoped<IMinimumNoticeCalculator, MinimumNoticeCalculator>();
 
         services.AddHealthChecks()
             .AddCheck<PostgreSqlHealthCheck>("postgresql", HealthStatus.Unhealthy, ["ready"]);
 
         return services;
+    }
+
+    private static TimeZoneInfo ResolveBusinessTimeZone(IConfiguration configuration)
+    {
+        var timeZoneId = configuration.GetSection(BusinessTimeOptions.SectionName)[nameof(BusinessTimeOptions.TimeZoneId)];
+        if (string.IsNullOrWhiteSpace(timeZoneId))
+        {
+            throw new InvalidOperationException("BusinessTime:TimeZoneId configuration is required.");
+        }
+
+        try
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById(timeZoneId.Trim());
+        }
+        catch (TimeZoneNotFoundException exception)
+        {
+            throw new InvalidOperationException($"BusinessTime:TimeZoneId '{timeZoneId}' is not a valid system time zone id.", exception);
+        }
+        catch (InvalidTimeZoneException exception)
+        {
+            throw new InvalidOperationException($"BusinessTime:TimeZoneId '{timeZoneId}' is invalid.", exception);
+        }
     }
 }

@@ -72,12 +72,12 @@ The implemented policy model now separates stable `LeavePolicy` records from eff
 
 Published versions are immutable and resolver-visible. Draft versions can be edited but never resolve. Published periods for the same policy must not overlap. Policy resolution prefers the deepest applicable OrgUnit override and then falls back to the company-wide LeaveType policy. A future LeaveRequest must reference the exact published `LeavePolicyVersion` used during evaluation.
 
-EP-04 stores day count mode, half-day allowance, notice days/mode, maximum request days, overlap behavior, and balance consumption bucket. It still does not calculate business days, holidays, actual leave-request overlaps, approvals, requests, ledger movements, user balances, carry-over, expiry, attachments, Entra, SharePoint, or capacity.
+EP-04 stores day count mode, half-day allowance, notice days/mode, maximum request days, overlap behavior, and balance consumption bucket. Later EPs added working-calendar day calculation, leave requests, approvals, balance ledger integration, documents, audit, and minimum-notice enforcement. Carry-over, expiry automation, Entra, SharePoint, and capacity remain deferred.
 
 ## Implemented EP-05 working-calendar slice
 
-EP-05 adds reusable day calculation for inclusive date ranges. `BUSINESS_DAYS` uses the selected `WorkingCalendar`; `CALENDAR_DAYS` does not require a calendar. LeaveRequest creation, notice enforcement, AM/PM half-day semantics, and request-specific date validation remain future work.
+EP-05 adds reusable day calculation for inclusive date ranges. `BUSINESS_DAYS` uses the selected `WorkingCalendar`; `CALENDAR_DAYS` does not require a calendar. Later EPs added LeaveRequest creation, submission, half-day validation, and minimum-notice enforcement; AM/PM partial-day semantics remain deferred.
 
 ## Implemented EP-07 request usage
 
-Leave requests now resolve the applicable published policy version at submission using the request `StartDate`. That exact version is frozen for the entire request. `MinimumNoticeDays` remains configured on policy versions but is not enforced until company timezone and inclusive/exclusive notice semantics are decided.
+Leave requests resolve the applicable published policy version at submission using the request `StartDate`. That exact version is frozen for the entire request. `MinimumNoticeDays` is enforced at submission using the configured business timezone, business-local `DateOnly` today, the policy notice day-count mode, and `WorkingCalendar` for `BUSINESS_DAYS`. Drafts may temporarily violate notice rules.
