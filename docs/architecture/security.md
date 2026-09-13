@@ -68,3 +68,8 @@ Audit metadata must be intentionally small and privacy-safe. Do not store passwo
 ## Implemented EP-17 required-document privacy boundary
 
 Required-document submission validation checks only persisted document metadata and never reopens private storage merely to prove presence. Upload audit metadata remains privacy-safe and excludes medical file content and storage keys. Manual create-for-other upload authority is limited to the original creator while the request is still `DRAFT` and scoped authority still exists; it does not grant read/download authority.
+
+
+## Implemented EP-19 aggregate reporting privacy boundary
+
+EP-19 reporting is protected by `leave.reports.read` and backend organizational scope. It reports only aggregate counts and authorized org-unit breakdowns. It intentionally excludes employee-level rows, individual request lists, leave-type analytics, medical analytics, document metadata, medical indicators, comments, reasons, balances, and audit data to avoid indirect disclosure in small teams or sensitive leave categories.
