@@ -25,6 +25,7 @@ public static class PermissionCodes
     public const string LeaveRequestsCancelDecide = "leave.requests.cancel.decide";
     public const string LeaveRequestsRevoke = "leave.requests.revoke";
     public const string LeaveRequestsCreateForOthers = "leave.requests.create.for_others";
+    public const string LeaveCalendarRead = "leave.calendar.read";
     public const string LeaveDocumentsReadSelf = "leave.documents.read.self";
     public const string LeaveDocumentsUploadSelf = "leave.documents.upload.self";
     public const string LeaveDocumentsRead = "leave.documents.read";

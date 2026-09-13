@@ -22,10 +22,13 @@ type LeaveRequestCancellation = { id: string; leaveRequestId: string; requestedB
 type LeaveRequestRevocation = { id: string; leaveRequestId: string; revokedByUserId: string; revokedByUserDisplayName: string | null; reason: string; operationId: string; balanceSettlementOperationId: string | null; createdAtUtc: string };
 type LeaveRequestDocument = { id: string; leaveRequestId: string; kind: string; originalFileName: string; contentType: string; sizeBytes: number; sha256: string; uploadedByUserId: string; uploadedByUserDisplayName: string | null; createdAtUtc: string };
 type LeaveRequest = { id: string; userId: string; userDisplayName: string | null; orgUnitId: string; orgUnitCode: string | null; orgUnitName: string | null; leaveTypeId: string; leaveTypeCode: string | null; leaveTypeName: string | null; leavePolicyVersionId: string | null; startDate: string; endDate: string; dayPortion: string; calculatedDays: number | null; status: string; comment: string | null; balanceAccountId: string | null; balanceReservationOperationId: string | null; submissionOperationId: string | null; createdByUserId: string; createdByUserDisplayName: string | null; createdAtUtc: string; submittedAtUtc: string | null; decidedAtUtc: string | null; cancellationRequestedAtUtc: string | null; cancellationDecidedAtUtc: string | null; revokedAtUtc: string | null; completedAtUtc: string | null; decision: LeaveRequestDecision | null; cancellation: LeaveRequestCancellation | null; revocation: LeaveRequestRevocation | null; documents: LeaveRequestDocument[] };
+type LeaveCalendarEntry = { leaveRequestId: string; subjectUserId: string; subjectDisplayName: string | null; orgUnitId: string; orgUnitName: string | null; startDate: string; endDate: string; dayPortion: string; status: string };
+type LeaveCalendarPage = { page: number; pageSize: number; totalCount: number; items: LeaveCalendarEntry[] };
 type SubmitLeaveRequestResult = { request: LeaveRequest; warnings: string[]; wasAlreadySubmitted: boolean };
 type AuditEvent = { id: string; occurredAtUtc: string; action: string; resourceType: string; resourceId: string | null; actorUserId: string | null; actorDisplayName: string | null; subjectUserId: string | null; subjectDisplayName: string | null; orgUnitId: string | null; orgUnitName: string | null; correlationId: string | null; metadataJson: string | null };
 type AuditEventListResult = { items: AuditEvent[]; page: number; pageSize: number; totalCount: number; hasNextPage: boolean };
 type AuditFilters = { action: string; resourceType: string; fromUtc: string; toUtc: string; page: number; pageSize: number };
+type LeaveCalendarFilters = { monthDate: Date; orgUnitId: string; page: number; pageSize: number };
 type Role = { id: string; code: string; name: string; description: string; isActive: boolean };
 type UserOrgAssignment = { id: string; userId: string; orgUnitId: string; orgUnitName: string; isPrimary: boolean; effectiveFromUtc: string; effectiveToUtc: string | null };
 type RoleScopeAssignment = { id: string; userId: string; roleId: string; roleCode: string; orgUnitId: string; includeDescendants: boolean; effectiveFromUtc: string; effectiveToUtc: string | null };
@@ -154,8 +157,58 @@ function toDateInput(value: string | null): string {
   return value ? value.slice(0, 10) : '';
 }
 
+function toDateOnly(value: Date): string {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function startOfMonth(value: Date): Date {
+  return new Date(value.getFullYear(), value.getMonth(), 1);
+}
+
+function endOfMonth(value: Date): Date {
+  return new Date(value.getFullYear(), value.getMonth() + 1, 0);
+}
+
+function addMonths(value: Date, months: number): Date {
+  return new Date(value.getFullYear(), value.getMonth() + months, 1);
+}
+
+function getMonthRange(value: Date): { from: string; to: string } {
+  return { from: toDateOnly(startOfMonth(value)), to: toDateOnly(endOfMonth(value)) };
+}
+
+function formatMonth(value: Date): string {
+  return value.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+}
+
+function formatDateOnly(value: string): string {
+  return new Date(`${value}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: '2-digit' });
+}
+
+function daysBetweenInclusive(from: string, to: string): number {
+  const fromTime = new Date(`${from}T00:00:00`).getTime();
+  const toTime = new Date(`${to}T00:00:00`).getTime();
+  return Math.floor((toTime - fromTime) / 86_400_000) + 1;
+}
+
+function clampDateOnly(value: string, minimum: string, maximum: string): string {
+  if (value < minimum) return minimum;
+  if (value > maximum) return maximum;
+  return value;
+}
+
 function statusBadgeClass(status: string): string {
   return status.toLowerCase().replaceAll('_', '-');
+}
+
+function formatLeaveCalendarStatus(status: string): string {
+  if (status === 'APPROVED') return 'Approved';
+  if (status === 'COMPLETED') return 'Completed';
+  if (status === 'CANCELLATION_REQUESTED') return 'Cancellation pending';
+  return status;
 }
 
 function formatTimestamp(value: string | null): string {
@@ -217,6 +270,37 @@ function OrgTree({ units }: { units: OrgUnit[] }) {
   );
 }
 
+function LeaveCalendarMonthView({ entries, visibleFrom, visibleTo }: { entries: LeaveCalendarEntry[]; visibleFrom: string; visibleTo: string }) {
+  if (entries.length === 0) return <p className="muted">No planned or completed absences in this period.</p>;
+
+  return (
+    <div className="team-calendar-list" aria-label="Team absences in selected month">
+      {entries.map((entry) => {
+        const visibleStart = clampDateOnly(entry.startDate, visibleFrom, visibleTo);
+        const visibleEnd = clampDateOnly(entry.endDate, visibleFrom, visibleTo);
+        const visibleDays = daysBetweenInclusive(visibleStart, visibleEnd);
+        return (
+          <article className={`team-calendar-entry ${entry.dayPortion === 'HALF_DAY' ? 'half-day' : ''}`} key={entry.leaveRequestId}>
+            <div className="team-calendar-dates">
+              <strong>{formatDateOnly(visibleStart)}{visibleStart === visibleEnd ? '' : `-${formatDateOnly(visibleEnd)}`}</strong>
+              <span>{visibleDays === 1 ? '1 visible day' : `${visibleDays} visible days`}</span>
+            </div>
+            <div>
+              <strong>{entry.subjectDisplayName ?? entry.subjectUserId}</strong>
+              <span className="muted">{entry.orgUnitName ?? entry.orgUnitId}</span>
+            </div>
+            <div className="team-calendar-meta">
+              <span className={`badge ${statusBadgeClass(entry.status)}`}>{formatLeaveCalendarStatus(entry.status)}</span>
+              <span className={`day-portion ${entry.dayPortion === 'HALF_DAY' ? 'half' : ''}`}>{entry.dayPortion === 'HALF_DAY' ? 'Half day' : 'Full day'}</span>
+              {entry.startDate < visibleFrom || entry.endDate > visibleTo ? <span className="muted">Continues outside this month</span> : null}
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
 export function App() {
   const [apiStatus, setApiStatus] = useState<HealthStatus>('Loading');
   const [databaseStatus, setDatabaseStatus] = useState<HealthStatus>('Loading');
@@ -257,6 +341,12 @@ export function App() {
   const [auditFilters, setAuditFilters] = useState<AuditFilters>({ action: '', resourceType: '', fromUtc: '', toUtc: '', page: 1, pageSize: 25 });
   const [auditMessage, setAuditMessage] = useState<string | null>(null);
   const [canReadAudit, setCanReadAudit] = useState(false);
+  const [teamCalendar, setTeamCalendar] = useState<LeaveCalendarPage | null>(null);
+  const [teamCalendarFilters, setTeamCalendarFilters] = useState<LeaveCalendarFilters>(() => ({ monthDate: startOfMonth(new Date()), orgUnitId: '', page: 1, pageSize: 25 }));
+  const [teamCalendarMessage, setTeamCalendarMessage] = useState<string | null>(null);
+  const [teamCalendarForbidden, setTeamCalendarForbidden] = useState(false);
+  const [isTeamCalendarLoading, setIsTeamCalendarLoading] = useState(false);
+  const [canReadTeamCalendar, setCanReadTeamCalendar] = useState(false);
   const [selectedAdminUserId, setSelectedAdminUserId] = useState<string>('');
   const [roles, setRoles] = useState<Role[]>([]);
   const [orgAssignments, setOrgAssignments] = useState<UserOrgAssignment[]>([]);
@@ -269,6 +359,7 @@ export function App() {
   const selectedAdminUser = useMemo(() => users.find((user) => user.id === selectedAdminUserId) ?? users[0] ?? null, [selectedAdminUserId, users]);
   const selectedAdminUserIsActor = selectedActorId !== null && selectedAdminUser?.id === selectedActorId;
   const visibleOrgUnits = useMemo(() => flattenOrgUnits(orgTree).filter((unit) => unit.isActive), [orgTree]);
+  const teamCalendarRange = useMemo(() => getMonthRange(teamCalendarFilters.monthDate), [teamCalendarFilters.monthDate]);
 
   async function loadCatalog(actorId: string | null) {
     const [types, buckets] = await Promise.all([
@@ -302,6 +393,44 @@ export function App() {
     if (filters.toUtc) params.set('toUtc', new Date(filters.toUtc).toISOString());
     setAuditEvents(await fetchJson<AuditEventListResult>(`/audit-events?${params.toString()}`, actorId));
   }, [auditFilters]);
+
+  const loadTeamCalendar = useCallback(async (actorId: string | null, filters: LeaveCalendarFilters = teamCalendarFilters) => {
+    const range = getMonthRange(filters.monthDate);
+    const params = new URLSearchParams({
+      from: range.from,
+      to: range.to,
+      page: String(filters.page),
+      pageSize: String(filters.pageSize),
+    });
+    if (filters.orgUnitId) params.set('orgUnitId', filters.orgUnitId);
+
+    setIsTeamCalendarLoading(true);
+    try {
+      const result = await fetchJson<LeaveCalendarPage>(`/leave-calendar?${params.toString()}`, actorId);
+      setTeamCalendar(result);
+      setCanReadTeamCalendar(true);
+      setTeamCalendarForbidden(false);
+      setTeamCalendarMessage(null);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        setCanReadTeamCalendar(false);
+        setTeamCalendar(null);
+        setTeamCalendarForbidden(false);
+        setTeamCalendarMessage('Sign in to view the team calendar.');
+      } else if (error instanceof ApiError && error.status === 403) {
+        if (!filters.orgUnitId) setCanReadTeamCalendar(false);
+        setTeamCalendar(null);
+        setTeamCalendarForbidden(true);
+        setTeamCalendarMessage('You do not have permission to view this team calendar.');
+      } else {
+        setTeamCalendar(null);
+        setTeamCalendarForbidden(false);
+        setTeamCalendarMessage(error instanceof Error ? error.message : 'Unable to load the team calendar.');
+      }
+    } finally {
+      setIsTeamCalendarLoading(false);
+    }
+  }, [teamCalendarFilters]);
 
   async function loadLeaveRequests(actorId: string | null) {
     setMyRequests(await fetchJson<LeaveRequest[]>('/leave-requests/me', actorId));
@@ -495,6 +624,14 @@ export function App() {
     };
   }, [loadAuditEvents, loadUserBalances, selectedActorId, selectedAdminUserId, selectedBalanceUserId]);
 
+  useEffect(() => {
+    async function loadCalendarForActor() {
+      await loadTeamCalendar(selectedActorId);
+    }
+
+    void loadCalendarForActor();
+  }, [loadTeamCalendar, selectedActorId]);
+
 
   function changeSelectedActor(actorId: string) {
     setSelectedActorId(actorId);
@@ -662,6 +799,18 @@ export function App() {
     const nextFilters = { ...auditFilters, page };
     setAuditFilters(nextFilters);
     try { await loadAuditEvents(selectedActorId, nextFilters); setAuditMessage(null); } catch (error) { setAuditMessage(error instanceof Error ? error.message : 'Unable to load audit events.'); }
+  }
+
+  function changeTeamCalendarMonth(monthDate: Date) {
+    setTeamCalendarFilters((current) => ({ ...current, monthDate: startOfMonth(monthDate), page: 1 }));
+  }
+
+  function changeTeamCalendarOrgUnit(orgUnitId: string) {
+    setTeamCalendarFilters((current) => ({ ...current, orgUnitId, page: 1 }));
+  }
+
+  function changeTeamCalendarPage(page: number) {
+    setTeamCalendarFilters((current) => ({ ...current, page }));
   }
 
   async function createLeaveType(event: FormEvent<HTMLFormElement>) {
@@ -1101,6 +1250,12 @@ export function App() {
         <StatusCard label="Database status" status={databaseStatus} />
       </section>
 
+      <nav className="page-nav" aria-label="Primary sections">
+        <a href="#leave-requests">Leave requests</a>
+        {canReadTeamCalendar ? <a href="#team-leave-calendar">Team calendar</a> : null}
+        <a href="#balances">Balances</a>
+      </nav>
+
       <section className="admin-panel" aria-label="Development authorization demo">
         <div>
           <p className="eyebrow">Development authorization demo</p>
@@ -1316,9 +1471,48 @@ export function App() {
         </form>
       </section>
 
+      {canReadTeamCalendar ? <section className="admin-panel" id="team-leave-calendar" aria-label="Team leave calendar">
+        <div>
+          <p className="eyebrow">Team calendar</p>
+          <h2>Leave Calendar</h2>
+          <p className="muted">Read-only monthly availability view. It shows who is away, when, organizational unit, and operational state only.</p>
+          {teamCalendarMessage ? <p className={teamCalendarForbidden || teamCalendarMessage.includes('failed') || teamCalendarMessage.includes('permission') ? 'error' : 'muted'}>{teamCalendarMessage}</p> : null}
+        </div>
+        <div className="team-calendar-toolbar">
+          <div className="tabs" aria-label="Month navigation">
+            <button type="button" onClick={() => changeTeamCalendarMonth(addMonths(teamCalendarFilters.monthDate, -1))}>Previous month</button>
+            <button type="button" onClick={() => changeTeamCalendarMonth(new Date())}>Today</button>
+            <button type="button" onClick={() => changeTeamCalendarMonth(addMonths(teamCalendarFilters.monthDate, 1))}>Next month</button>
+          </div>
+          <label className="actor-selector">
+            <span>Organization</span>
+            <select value={teamCalendarFilters.orgUnitId} onChange={(event) => changeTeamCalendarOrgUnit(event.target.value)}>
+              <option value="">All authorized units</option>
+              {visibleOrgUnits.map((unit) => <option key={unit.id} value={unit.id}>{unit.code} - {unit.name}</option>)}
+            </select>
+          </label>
+        </div>
+        <article className="panel-card">
+          <div className="team-calendar-heading">
+            <div>
+              <h3>{formatMonth(teamCalendarFilters.monthDate)}</h3>
+              <p className="muted">{teamCalendarRange.from} to {teamCalendarRange.to}</p>
+            </div>
+            <span className="badge pending-approval">{teamCalendar?.totalCount ?? 0} visible absences</span>
+          </div>
+          {isTeamCalendarLoading ? <p className="muted">Loading team calendar...</p> : null}
+          {!isTeamCalendarLoading && teamCalendar ? <LeaveCalendarMonthView entries={teamCalendar.items} visibleFrom={teamCalendarRange.from} visibleTo={teamCalendarRange.to} /> : null}
+          {!isTeamCalendarLoading && !teamCalendar && !teamCalendarMessage ? <p className="muted">No planned or completed absences in this period.</p> : null}
+          {teamCalendar ? <div className="pagination-controls">
+            <button type="button" disabled={teamCalendar.page <= 1 || isTeamCalendarLoading} onClick={() => changeTeamCalendarPage(teamCalendar.page - 1)}>Previous</button>
+            <span>Page {teamCalendar.page} · {teamCalendar.items.length} of {teamCalendar.totalCount}</span>
+            <button type="button" disabled={teamCalendar.page * teamCalendar.pageSize >= teamCalendar.totalCount || isTeamCalendarLoading} onClick={() => changeTeamCalendarPage(teamCalendar.page + 1)}>Next</button>
+          </div> : null}
+          <p className="muted">Privacy: entries intentionally do not show leave type, medical status, reason, comments, documents, or balances.</p>
+        </article>
+      </section> : null}
 
-
-      <section className="admin-panel" aria-label="Leave requests">
+      <section className="admin-panel" id="leave-requests" aria-label="Leave requests">
         <div>
           <p className="eyebrow">Leave requests</p>
           <h2>My requests</h2>
@@ -1450,7 +1644,7 @@ export function App() {
         {scopedRequests.length > 0 ? <article className="panel-card"><h3>Scoped request inspector</h3><div className="catalog-list">{scopedRequests.map((request) => <div className="version-row" key={request.id}><span>{request.userDisplayName ?? request.userId}</span><span>{request.leaveTypeCode}</span><span>{request.orgUnitCode}</span><span>{request.startDate} → {request.endDate}</span><span className={`badge ${statusBadgeClass(request.status)}`}>{request.status}</span><span>Calculated days: {request.calculatedDays ?? 'pending'} · Leave type: {request.leaveTypeName ?? request.leaveTypeCode ?? request.leaveTypeId}</span>{request.status === 'COMPLETED' ? <span>Completed: {formatTimestamp(request.completedAtUtc)}</span> : null}{request.decision ? <span>{request.decision.decision} · {request.decision.comment ?? 'No decision comment'}</span> : null}{request.cancellation ? <span>Cancellation: {request.cancellation.reason}</span> : null}{request.revocation ? <span>Revocation: {request.revocation.reason}</span> : null}{request.documents.length > 0 ? <span>Documents: {request.documents.map((document) => <button type="button" key={document.id} onClick={() => void downloadLeaveRequestDocument(document)}>{document.originalFileName}</button>)}</span> : <span className="muted">No documents</span>}{request.status === 'APPROVED' && request.userId !== selectedActorId ? <form className="catalog-form inline-form" onSubmit={(event) => revokeLeaveRequest(event, request.id)}><input name="reason" placeholder="Revocation reason" required /><button type="submit" disabled={processingDecisionId === request.id}>Revoke</button></form> : null}</div>)}</div></article> : null}
       </section>
 
-      <section className="admin-panel" aria-label="Balance ledger">
+      <section className="admin-panel" id="balances" aria-label="Balance ledger">
         <div>
           <p className="eyebrow">Balances</p>
           <h2>My balances and scoped balance ledger</h2>

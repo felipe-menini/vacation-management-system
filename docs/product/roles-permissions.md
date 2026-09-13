@@ -140,3 +140,13 @@ EP-10 adds:
 Development seed grants own read/upload to Employee, Supervisor, Manager, and HR. Supervisor, Manager, and HR receive scoped document read. Technical Administrator receives no automatic medical document access.
 
 Scoped document access is authorized independently from ordinary request visibility and uses the leave request's stored `OrgUnitId`, not the employee's current assignment.
+
+## Implemented team leave calendar permission
+
+EP-18 adds:
+
+| Permission | Description |
+| --- | --- |
+| `leave.calendar.read` | Read privacy-minimized team leave calendar entries inside authorized organizational scope. |
+
+Development seed grants `leave.calendar.read` to Supervisor, Manager, and HR. Employee and Technical Administrator receive no automatic team leave calendar access. Scope is evaluated against the leave request's stored `OrgUnitId`, including the assigned IncludeDescendants behavior where configured. The calendar intentionally hides leave type, reasons/comments, cancellation/decision reasons, document metadata, medical indicators, and balance details.
