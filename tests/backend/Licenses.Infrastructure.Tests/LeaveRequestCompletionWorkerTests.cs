@@ -206,6 +206,7 @@ public sealed class LeaveRequestCompletionWorkerTests
         public Task<LeaveRequestDocument?> GetDocumentAsync(Guid id, bool tracking, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<IReadOnlyList<LeaveRequestDocument>> ListDocumentsByRequestIdAsync(Guid requestId, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<IReadOnlyList<LeaveRequestDocument>> ListDocumentsByRequestIdsAsync(IReadOnlyCollection<Guid> requestIds, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<bool> HasDocumentOfKindAsync(Guid requestId, LeaveRequestDocumentKind kind, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task AddDocumentAsync(LeaveRequestDocument document, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<LeaveRequestDecision?> GetDecisionByOperationIdAsync(Guid operationId, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<LeaveRequestDecision?> GetDecisionByRequestIdAsync(Guid requestId, CancellationToken cancellationToken) => throw new NotSupportedException();

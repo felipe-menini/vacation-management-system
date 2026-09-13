@@ -38,7 +38,7 @@ stateDiagram-v2
 
 1. Employee completes a request and the frontend asks the backend for prevalidation.
 2. Backend resolves effective policy, calendar, balance, overlap, and capacity conflicts.
-3. On submit, one transaction creates the request, reserves balance if applicable, creates approval workflow, and records audit.
+3. On submit, the backend validates any required supporting document before side effects, then one transaction freezes the policy version, reserves balance if applicable, records audit, and enqueues outbox.
 4. The approval engine resolves the first approver from organization and policy.
 5. Each decision is stored immutably with actor, timestamp, comment, and context.
 6. When all steps complete, reservation becomes consumption. On rejection, reservation is released.
@@ -73,3 +73,7 @@ DRAFT -> PENDING_APPROVAL -> APPROVED
 There is one final approval decision. Multi-step approval and configurable routing are intentionally deferred. EP-11 sends outbound workflow notifications from committed outbox events; frontend notification-center behavior remains out of scope. EP-15 completes approved requests automatically after the approved leave period has ended; completion has no notification/outbox event.
 
 Approval consumes the existing reservation. Rejection releases it. Both use the frozen submitted request values and store immutable decision history.
+
+## Implemented EP-17 required-document submission gate
+
+When the resolved policy version requires a document, submission first checks persisted request-document metadata for that kind. A missing document returns `REQUIRED_DOCUMENT_MISSING`, leaves the request in `DRAFT`, and creates no balance reservation, successful submit audit, outbox event, calculated days, or frozen policy version. Self-service and submit-for-other both use this same gate.

@@ -48,6 +48,7 @@ public interface ILeaveRequestRepository
     Task<LeaveRequestDocument?> GetDocumentAsync(Guid id, bool tracking, CancellationToken cancellationToken);
     Task<IReadOnlyList<LeaveRequestDocument>> ListDocumentsByRequestIdAsync(Guid requestId, CancellationToken cancellationToken);
     Task<IReadOnlyList<LeaveRequestDocument>> ListDocumentsByRequestIdsAsync(IReadOnlyCollection<Guid> requestIds, CancellationToken cancellationToken);
+    Task<bool> HasDocumentOfKindAsync(Guid requestId, LeaveRequestDocumentKind kind, CancellationToken cancellationToken);
     Task AddDocumentAsync(LeaveRequestDocument document, CancellationToken cancellationToken);
     Task<LeaveRequestDecision?> GetDecisionByOperationIdAsync(Guid operationId, CancellationToken cancellationToken);
     Task<LeaveRequestDecision?> GetDecisionByRequestIdAsync(Guid requestId, CancellationToken cancellationToken);

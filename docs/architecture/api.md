@@ -76,6 +76,8 @@ EP-09 adds explicit endpoints for post-approval lifecycle and manual creation:
 - `POST /api/leave-requests/{id}/reject-cancellation`
 - `POST /api/leave-requests/{id}/revoke`
 - `POST /api/users/{userId}/leave-requests`
+- `POST /api/users/{userId}/leave-requests/drafts`
+- `POST /api/leave-requests/{id}/submit-for-other`
 
 These commands use operation ids for idempotency. They do not accept caller-supplied status, calculated days, policy version, balance account, reservation id, or settlement operation id.
 
@@ -88,3 +90,9 @@ EP-10 adds private leave-request document endpoints:
 - `GET /api/leave-request-documents/{documentId}/content`
 
 Uploads use `multipart/form-data` with a `file` part. Content is streamed only by the backend after authorization; metadata responses never expose `StorageKey` or direct storage URLs.
+
+## Implemented EP-17 required-document API behavior
+
+Policy version DTOs and create/update commands include nullable `requiredDocumentKind`. Submission endpoints return `400` with code `REQUIRED_DOCUMENT_MISSING` and safe `requiredDocumentKind` when the resolved policy version requires a missing document. The failed response exposes no storage key, file bytes, or storage URL.
+
+Manual create-for-other now has a draft-capable endpoint, `POST /api/users/{userId}/leave-requests/drafts`, followed by existing private document upload and `POST /api/leave-requests/{id}/submit-for-other`. The compatibility atomic endpoint remains available and uses the same submission rules.

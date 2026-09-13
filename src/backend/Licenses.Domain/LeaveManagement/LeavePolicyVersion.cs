@@ -8,7 +8,7 @@ public sealed class LeavePolicyVersion
 {
     private LeavePolicyVersion() { }
 
-    private LeavePolicyVersion(Guid id, Guid leavePolicyId, int versionNumber, DateOnly effectiveFrom, DateOnly? effectiveTo, PolicyDayCountMode dayCountMode, bool allowHalfDay, int? minimumNoticeDays, PolicyDayCountMode noticeDayCountMode, decimal? maximumRequestDays, PolicyOverlapBehavior overlapBehavior, bool consumesBalance, Guid? balanceBucketId, Guid? workingCalendarId, DateTime createdAtUtc)
+    private LeavePolicyVersion(Guid id, Guid leavePolicyId, int versionNumber, DateOnly effectiveFrom, DateOnly? effectiveTo, PolicyDayCountMode dayCountMode, bool allowHalfDay, int? minimumNoticeDays, PolicyDayCountMode noticeDayCountMode, decimal? maximumRequestDays, PolicyOverlapBehavior overlapBehavior, bool consumesBalance, Guid? balanceBucketId, Guid? workingCalendarId, DateTime createdAtUtc, LeaveRequestDocumentKind? requiredDocumentKind)
     {
         Id = id == Guid.Empty ? throw new ArgumentException("Id is required.", nameof(id)) : id;
         LeavePolicyId = leavePolicyId == Guid.Empty ? throw new ArgumentException("Leave policy is required.", nameof(leavePolicyId)) : leavePolicyId;
@@ -16,7 +16,7 @@ public sealed class LeavePolicyVersion
         Status = LeavePolicyVersionStatus.Draft;
         CreatedAtUtc = EnsureUtc(createdAtUtc, nameof(createdAtUtc));
         UpdatedAtUtc = CreatedAtUtc;
-        ApplyRules(effectiveFrom, effectiveTo, dayCountMode, allowHalfDay, minimumNoticeDays, noticeDayCountMode, maximumRequestDays, overlapBehavior, consumesBalance, balanceBucketId, workingCalendarId);
+        ApplyRules(effectiveFrom, effectiveTo, dayCountMode, allowHalfDay, minimumNoticeDays, noticeDayCountMode, maximumRequestDays, overlapBehavior, consumesBalance, balanceBucketId, workingCalendarId, requiredDocumentKind);
     }
 
     public Guid Id { get; private set; }
@@ -34,17 +34,18 @@ public sealed class LeavePolicyVersion
     public bool ConsumesBalance { get; private set; }
     public Guid? BalanceBucketId { get; private set; }
     public Guid? WorkingCalendarId { get; private set; }
+    public LeaveRequestDocumentKind? RequiredDocumentKind { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
     public DateTime UpdatedAtUtc { get; private set; }
     public DateTime? PublishedAtUtc { get; private set; }
 
-    public static LeavePolicyVersion CreateDraft(Guid leavePolicyId, int versionNumber, DateOnly effectiveFrom, DateOnly? effectiveTo, PolicyDayCountMode dayCountMode, bool allowHalfDay, int? minimumNoticeDays, PolicyDayCountMode noticeDayCountMode, decimal? maximumRequestDays, PolicyOverlapBehavior overlapBehavior, bool consumesBalance, Guid? balanceBucketId, Guid? workingCalendarId, DateTime createdAtUtc) =>
-        new(Guid.NewGuid(), leavePolicyId, versionNumber, effectiveFrom, effectiveTo, dayCountMode, allowHalfDay, minimumNoticeDays, noticeDayCountMode, maximumRequestDays, overlapBehavior, consumesBalance, balanceBucketId, workingCalendarId, createdAtUtc);
+    public static LeavePolicyVersion CreateDraft(Guid leavePolicyId, int versionNumber, DateOnly effectiveFrom, DateOnly? effectiveTo, PolicyDayCountMode dayCountMode, bool allowHalfDay, int? minimumNoticeDays, PolicyDayCountMode noticeDayCountMode, decimal? maximumRequestDays, PolicyOverlapBehavior overlapBehavior, bool consumesBalance, Guid? balanceBucketId, Guid? workingCalendarId, DateTime createdAtUtc, LeaveRequestDocumentKind? requiredDocumentKind = null) =>
+        new(Guid.NewGuid(), leavePolicyId, versionNumber, effectiveFrom, effectiveTo, dayCountMode, allowHalfDay, minimumNoticeDays, noticeDayCountMode, maximumRequestDays, overlapBehavior, consumesBalance, balanceBucketId, workingCalendarId, createdAtUtc, requiredDocumentKind);
 
-    public void UpdateDraft(DateOnly effectiveFrom, DateOnly? effectiveTo, PolicyDayCountMode dayCountMode, bool allowHalfDay, int? minimumNoticeDays, PolicyDayCountMode noticeDayCountMode, decimal? maximumRequestDays, PolicyOverlapBehavior overlapBehavior, bool consumesBalance, Guid? balanceBucketId, Guid? workingCalendarId, DateTime updatedAtUtc)
+    public void UpdateDraft(DateOnly effectiveFrom, DateOnly? effectiveTo, PolicyDayCountMode dayCountMode, bool allowHalfDay, int? minimumNoticeDays, PolicyDayCountMode noticeDayCountMode, decimal? maximumRequestDays, PolicyOverlapBehavior overlapBehavior, bool consumesBalance, Guid? balanceBucketId, Guid? workingCalendarId, DateTime updatedAtUtc, LeaveRequestDocumentKind? requiredDocumentKind = null)
     {
         EnsureDraft();
-        ApplyRules(effectiveFrom, effectiveTo, dayCountMode, allowHalfDay, minimumNoticeDays, noticeDayCountMode, maximumRequestDays, overlapBehavior, consumesBalance, balanceBucketId, workingCalendarId);
+        ApplyRules(effectiveFrom, effectiveTo, dayCountMode, allowHalfDay, minimumNoticeDays, noticeDayCountMode, maximumRequestDays, overlapBehavior, consumesBalance, balanceBucketId, workingCalendarId, requiredDocumentKind);
         UpdatedAtUtc = EnsureUtc(updatedAtUtc, nameof(updatedAtUtc));
     }
 
@@ -56,12 +57,13 @@ public sealed class LeavePolicyVersion
         UpdatedAtUtc = PublishedAtUtc.Value;
     }
 
-    private void ApplyRules(DateOnly effectiveFrom, DateOnly? effectiveTo, PolicyDayCountMode dayCountMode, bool allowHalfDay, int? minimumNoticeDays, PolicyDayCountMode noticeDayCountMode, decimal? maximumRequestDays, PolicyOverlapBehavior overlapBehavior, bool consumesBalance, Guid? balanceBucketId, Guid? workingCalendarId)
+    private void ApplyRules(DateOnly effectiveFrom, DateOnly? effectiveTo, PolicyDayCountMode dayCountMode, bool allowHalfDay, int? minimumNoticeDays, PolicyDayCountMode noticeDayCountMode, decimal? maximumRequestDays, PolicyOverlapBehavior overlapBehavior, bool consumesBalance, Guid? balanceBucketId, Guid? workingCalendarId, LeaveRequestDocumentKind? requiredDocumentKind)
     {
         if (effectiveTo is not null && effectiveTo.Value < effectiveFrom) throw new ArgumentException("EffectiveTo must be greater than or equal to EffectiveFrom.");
         if (!Enum.IsDefined(dayCountMode)) throw new ArgumentOutOfRangeException(nameof(dayCountMode), "Day count mode is invalid.");
         if (!Enum.IsDefined(noticeDayCountMode)) throw new ArgumentOutOfRangeException(nameof(noticeDayCountMode), "Notice day count mode is invalid.");
         if (!Enum.IsDefined(overlapBehavior)) throw new ArgumentOutOfRangeException(nameof(overlapBehavior), "Overlap behavior is invalid.");
+        if (requiredDocumentKind is not null && !Enum.IsDefined(requiredDocumentKind.Value)) throw new ArgumentOutOfRangeException(nameof(requiredDocumentKind), "Required document kind is invalid.");
         if (minimumNoticeDays is < 0) throw new ArgumentOutOfRangeException(nameof(minimumNoticeDays), "Minimum notice days must be non-negative.");
         if (maximumRequestDays is <= 0) throw new ArgumentOutOfRangeException(nameof(maximumRequestDays), "Maximum request days must be greater than zero.");
         if (consumesBalance && balanceBucketId is null) throw new InvalidOperationException("A balance bucket is required when the policy consumes balance.");
@@ -80,6 +82,7 @@ public sealed class LeavePolicyVersion
         ConsumesBalance = consumesBalance;
         BalanceBucketId = balanceBucketId;
         WorkingCalendarId = workingCalendarId;
+        RequiredDocumentKind = requiredDocumentKind;
     }
 
     private void EnsureDraft()

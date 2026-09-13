@@ -277,6 +277,49 @@ public sealed class LeaveRequestApprovalServiceTests
     }
 
     [Fact]
+    public async Task SelfSubmissionRequiresConfiguredPersistedDocumentKindBeforeSideEffects()
+    {
+        var setup = TestSetup.CreateDraft(consumesBalance: true, requiredDocumentKind: LeaveRequestDocumentKind.MedicalCertificate);
+        var service = setup.CreateService(setup.Employee.Id, PermissionCodes.LeaveRequestsCreateSelf);
+
+        var ex = await Assert.ThrowsAsync<RequiredDocumentValidationException>(() => service.SubmitAsync(setup.Request.Id, CancellationToken.None)!);
+
+        Assert.Equal("REQUIRED_DOCUMENT_MISSING", ex.Code);
+        Assert.Equal(LeaveRequestDocumentKind.MedicalCertificate, ex.RequiredDocumentKind);
+        AssertFailureHasNoSubmissionSideEffects(setup);
+    }
+
+    [Fact]
+    public async Task RequiredPersistedDocumentKindAllowsSubmission()
+    {
+        var setup = TestSetup.CreateDraft(consumesBalance: true, requiredDocumentKind: LeaveRequestDocumentKind.MedicalCertificate);
+        await setup.Requests.AddDocumentAsync(CreateMedicalCertificate(setup.Request.Id, setup.Employee.Id), CancellationToken.None);
+        var service = setup.CreateService(setup.Employee.Id, PermissionCodes.LeaveRequestsCreateSelf);
+
+        var result = await service.SubmitAsync(setup.Request.Id, CancellationToken.None);
+
+        Assert.Equal("PENDING_APPROVAL", result!.Request.Status);
+        Assert.Equal(setup.Version.Id, result.Request.LeavePolicyVersionId);
+        Assert.Single(setup.Balances.Mutations);
+        Assert.Single(setup.Outbox.Messages);
+        Assert.Single(setup.Audit.Events);
+    }
+
+    [Fact]
+    public async Task ManualCreateForOthersDoesNotBypassRequiredDocumentPolicy()
+    {
+        var setup = TestSetup.CreateDraft(consumesBalance: true, requiredDocumentKind: LeaveRequestDocumentKind.MedicalCertificate);
+        var command = new CreateLeaveRequestForUserCommand(setup.Unit.Id, setup.Type.Id, new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 1), "FULL_DAY", "Manual", Guid.NewGuid());
+
+        var ex = await Assert.ThrowsAsync<RequiredDocumentValidationException>(() => setup.CreateService(setup.Approver.Id, PermissionCodes.LeaveRequestsCreateForOthers).CreateForUserAsync(setup.Employee.Id, command, CancellationToken.None));
+
+        Assert.Equal("REQUIRED_DOCUMENT_MISSING", ex.Code);
+        Assert.Empty(setup.Balances.Mutations);
+        Assert.Empty(setup.Outbox.Messages);
+        Assert.Empty(setup.Audit.Events);
+    }
+
+    [Fact]
     public async Task ManualCreateForOthersUsesMaximumRequestDaysWithoutPrivilegedBypass()
     {
         var above = TestSetup.CreateDraft(consumesBalance: true, maximumRequestDays: 1m);
@@ -474,6 +517,76 @@ public sealed class LeaveRequestApprovalServiceTests
         Assert.Equal(setup.Employee.Id, setup.Audit.Events[0].SubjectUserId);
     }
 
+    [Fact]
+    public async Task ManualCreateDraftForOthersPersistsDraftOnlyAndAuditsCreateForOther()
+    {
+        var setup = TestSetup.CreateDraft(consumesBalance: true);
+        var service = setup.CreateService(setup.Approver.Id, PermissionCodes.LeaveRequestsCreateForOthers);
+        var command = new CreateLeaveRequestCommand(setup.Unit.Id, setup.Type.Id, new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 2), "FULL_DAY", "Manual draft");
+
+        var result = await service.CreateDraftForUserAsync(setup.Employee.Id, command, CancellationToken.None);
+
+        Assert.Equal("DRAFT", result.Status);
+        Assert.Equal(setup.Employee.Id, result.UserId);
+        Assert.Equal(setup.Approver.Id, result.CreatedByUserId);
+        Assert.Null(result.LeavePolicyVersionId);
+        Assert.Null(result.CalculatedDays);
+        Assert.Null(result.BalanceAccountId);
+        Assert.Null(result.BalanceReservationOperationId);
+        Assert.Null(result.SubmissionOperationId);
+        Assert.Empty(setup.Balances.Mutations);
+        Assert.Empty(setup.Outbox.Messages);
+        Assert.Single(setup.Audit.Events);
+        Assert.Equal("leave.request.create_for_other", setup.Audit.Events[0].Action);
+        Assert.Equal(setup.Approver.Id, setup.Audit.Events[0].ActorUserId);
+        Assert.Equal(setup.Employee.Id, setup.Audit.Events[0].SubjectUserId);
+    }
+
+    [Fact]
+    public async Task ManualSubmitForOthersRequiresCreatorWithCreateForOthersScope()
+    {
+        var setup = TestSetup.CreateDraft(consumesBalance: false);
+        var creatorService = setup.CreateService(setup.Approver.Id, PermissionCodes.LeaveRequestsCreateForOthers);
+        var draft = await creatorService.CreateDraftForUserAsync(setup.Employee.Id, new(setup.Unit.Id, setup.Type.Id, new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 1), "FULL_DAY", null), CancellationToken.None);
+
+        Assert.Null(await setup.CreateService(setup.Employee.Id, PermissionCodes.LeaveRequestsCreateForOthers).SubmitForUserAsync(draft.Id, CancellationToken.None));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => setup.CreateService(setup.Approver.Id).SubmitForUserAsync(draft.Id, CancellationToken.None)!);
+
+        var result = await creatorService.SubmitForUserAsync(draft.Id, CancellationToken.None);
+
+        Assert.Equal("PENDING_APPROVAL", result!.Request.Status);
+        Assert.Contains(setup.Audit.Events, x => x.Action == "leave.request.submit" && x.ActorUserId == setup.Approver.Id && x.SubjectUserId == setup.Employee.Id);
+    }
+
+    [Fact]
+    public async Task ManualSubmitForOthersUsesRequiredDocumentsAndExistingSubmissionRules()
+    {
+        var setup = TestSetup.CreateDraft(consumesBalance: true, minimumNoticeDays: 0, maximumRequestDays: 1m, requiredDocumentKind: LeaveRequestDocumentKind.MedicalCertificate);
+        var service = setup.CreateService(setup.Approver.Id, PermissionCodes.LeaveRequestsCreateForOthers);
+        var draft = await service.CreateDraftForUserAsync(setup.Employee.Id, new(setup.Unit.Id, setup.Type.Id, new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 1), "FULL_DAY", null), CancellationToken.None);
+        setup.Audit.Events.Clear();
+
+        var missing = await Assert.ThrowsAsync<RequiredDocumentValidationException>(() => service.SubmitForUserAsync(draft.Id, CancellationToken.None)!);
+        Assert.Equal("REQUIRED_DOCUMENT_MISSING", missing.Code);
+        var persistedDraft = await setup.Requests.GetAsync(draft.Id, tracking: false, CancellationToken.None);
+        Assert.Equal(LeaveRequestStatus.Draft, persistedDraft!.Status);
+        Assert.Empty(setup.Balances.Mutations);
+        Assert.Empty(setup.Outbox.Messages);
+        Assert.Empty(setup.Audit.Events);
+
+        await setup.Requests.AddDocumentAsync(CreateMedicalCertificate(draft.Id, setup.Approver.Id), CancellationToken.None);
+        var result = await service.SubmitForUserAsync(draft.Id, CancellationToken.None);
+        var retry = await service.SubmitForUserAsync(draft.Id, CancellationToken.None);
+
+        Assert.Equal("PENDING_APPROVAL", result!.Request.Status);
+        Assert.Equal(setup.Version.Id, result.Request.LeavePolicyVersionId);
+        Assert.True(retry!.WasAlreadySubmitted);
+        Assert.Single(setup.Balances.Mutations);
+        Assert.Single(setup.Outbox.Messages);
+        Assert.Single(setup.Audit.Events);
+        Assert.Equal("leave.request.submit", setup.Audit.Events[0].Action);
+    }
+
     private static void AssertFailureHasNoSubmissionSideEffects(TestSetup setup)
     {
         Assert.Equal(LeaveRequestStatus.Draft, setup.Request.Status);
@@ -500,10 +613,11 @@ public sealed class LeaveRequestApprovalServiceTests
             bool exposeCalendarToCalculator = true,
             DateTime? utcNow = null,
             DateOnly? requestStartDate = null,
-            DateOnly? requestEndDate = null) =>
-            CreateCore(consumesBalance, submitted: false, minimumNoticeDays, noticeMode, maximumRequestDays, dayCountMode, dayPortion, workingCalendar, exposeCalendarToCalculator, utcNow, requestStartDate, requestEndDate);
+            DateOnly? requestEndDate = null,
+            LeaveRequestDocumentKind? requiredDocumentKind = null) =>
+            CreateCore(consumesBalance, submitted: false, minimumNoticeDays, noticeMode, maximumRequestDays, dayCountMode, dayPortion, workingCalendar, exposeCalendarToCalculator, utcNow, requestStartDate, requestEndDate, requiredDocumentKind);
 
-        private static TestSetup CreateCore(bool consumesBalance, bool submitted, int? minimumNoticeDays = null, PolicyDayCountMode noticeMode = PolicyDayCountMode.CalendarDays, decimal? maximumRequestDays = null, PolicyDayCountMode dayCountMode = PolicyDayCountMode.CalendarDays, LeaveRequestDayPortion dayPortion = LeaveRequestDayPortion.FullDay, WorkingCalendar? workingCalendar = null, bool exposeCalendarToCalculator = true, DateTime? utcNow = null, DateOnly? requestStartDate = null, DateOnly? requestEndDate = null)
+        private static TestSetup CreateCore(bool consumesBalance, bool submitted, int? minimumNoticeDays = null, PolicyDayCountMode noticeMode = PolicyDayCountMode.CalendarDays, decimal? maximumRequestDays = null, PolicyDayCountMode dayCountMode = PolicyDayCountMode.CalendarDays, LeaveRequestDayPortion dayPortion = LeaveRequestDayPortion.FullDay, WorkingCalendar? workingCalendar = null, bool exposeCalendarToCalculator = true, DateTime? utcNow = null, DateOnly? requestStartDate = null, DateOnly? requestEndDate = null, LeaveRequestDocumentKind? requiredDocumentKind = null)
         {
             var now = utcNow ?? Now;
             var employee = User.Create("Employee", $"employee.{Guid.NewGuid():N}@example.test", null, Now);
@@ -512,7 +626,7 @@ public sealed class LeaveRequestApprovalServiceTests
             var type = LeaveType.Create("VAC" + Guid.NewGuid().ToString("N")[..8], "Vacation", null, 1, true, Now);
             var bucketId = consumesBalance ? Guid.NewGuid() : (Guid?)null;
             var policy = LeavePolicy.Create(type.Id, null, false, true, Now);
-            var version = LeavePolicyVersion.CreateDraft(policy.Id, 1, new DateOnly(2026, 1, 1), null, dayCountMode, true, minimumNoticeDays, noticeMode, maximumRequestDays, PolicyOverlapBehavior.Block, consumesBalance, bucketId, workingCalendar?.Id, Now);
+            var version = LeavePolicyVersion.CreateDraft(policy.Id, 1, new DateOnly(2026, 1, 1), null, dayCountMode, true, minimumNoticeDays, noticeMode, maximumRequestDays, PolicyOverlapBehavior.Block, consumesBalance, bucketId, workingCalendar?.Id, Now, requiredDocumentKind);
             version.Publish(Now);
             var request = LeaveRequest.CreateDraft(employee.Id, unit.Id, type.Id, requestStartDate ?? new DateOnly(2026, 9, 1), requestEndDate ?? new DateOnly(2026, 9, 2), dayPortion, "Employee comment", employee.Id, Now);
             if (submitted)
@@ -558,6 +672,7 @@ public sealed class LeaveRequestApprovalServiceTests
         public Task<LeaveRequestDocument?> GetDocumentAsync(Guid id, bool tracking, CancellationToken ct) => Task.FromResult(_documents.SingleOrDefault(x => x.Id == id));
         public Task<IReadOnlyList<LeaveRequestDocument>> ListDocumentsByRequestIdAsync(Guid requestId, CancellationToken ct) => Task.FromResult<IReadOnlyList<LeaveRequestDocument>>(_documents.Where(x => x.LeaveRequestId == requestId).ToList());
         public Task<IReadOnlyList<LeaveRequestDocument>> ListDocumentsByRequestIdsAsync(IReadOnlyCollection<Guid> ids, CancellationToken ct) => Task.FromResult<IReadOnlyList<LeaveRequestDocument>>(_documents.Where(x => ids.Contains(x.LeaveRequestId)).ToList());
+        public Task<bool> HasDocumentOfKindAsync(Guid requestId, LeaveRequestDocumentKind kind, CancellationToken ct) => Task.FromResult(_documents.Any(x => x.LeaveRequestId == requestId && x.Kind == kind));
         public Task AddDocumentAsync(LeaveRequestDocument document, CancellationToken ct) { _documents.Add(document); return Task.CompletedTask; }
         public Task<LeaveRequestDecision?> GetDecisionByOperationIdAsync(Guid operationId, CancellationToken ct) => Task.FromResult(_decisions.SingleOrDefault(x => x.OperationId == operationId));
         public Task<LeaveRequestDecision?> GetDecisionByRequestIdAsync(Guid requestId, CancellationToken ct) => Task.FromResult(_decisions.SingleOrDefault(x => x.LeaveRequestId == requestId));
@@ -680,6 +795,9 @@ public sealed class LeaveRequestApprovalServiceTests
             [DayOfWeek.Friday] = true,
             [DayOfWeek.Saturday] = false
         }, Now);
+
+    private static LeaveRequestDocument CreateMedicalCertificate(Guid requestId, Guid uploadedByUserId) =>
+        LeaveRequestDocument.Create(requestId, LeaveRequestDocumentKind.MedicalCertificate, "certificate.pdf", "application/pdf", 12, LeaveRequestDocument.CreateOpaqueStorageKey("pdf"), new string('a', LeaveRequestDocument.Sha256HexLength), uploadedByUserId, Now);
 
     private sealed class FakeWorkingCalendarRepository(params WorkingCalendar[] calendars) : IWorkingCalendarRepository
     {

@@ -68,6 +68,22 @@ public static class LeaveRequestEndpoints
             }
             catch (MinimumNoticeValidationException ex) { return Results.BadRequest(ToMinimumNoticeError(ex)); }
             catch (MaximumRequestDaysValidationException ex) { return Results.BadRequest(ToMaximumRequestDaysError(ex)); }
+            catch (RequiredDocumentValidationException ex) { return Results.BadRequest(ToRequiredDocumentError(ex)); }
+            catch (UnauthorizedAccessException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status403Forbidden); }
+            catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+            catch (InvalidOperationException ex) { return Results.Conflict(new { error = ex.Message }); }
+        });
+
+        group.MapPost("/{id:guid}/submit-for-other", async (Guid id, ICurrentActor actor, LeaveRequestService service, CancellationToken cancellationToken) =>
+        {
+            if (actor.UserId is null) return Results.Unauthorized();
+            try
+            {
+                return await service.SubmitForUserAsync(id, cancellationToken) is { } result ? Results.Ok(result) : Results.NotFound();
+            }
+            catch (MinimumNoticeValidationException ex) { return Results.BadRequest(ToMinimumNoticeError(ex)); }
+            catch (MaximumRequestDaysValidationException ex) { return Results.BadRequest(ToMaximumRequestDaysError(ex)); }
+            catch (RequiredDocumentValidationException ex) { return Results.BadRequest(ToRequiredDocumentError(ex)); }
             catch (UnauthorizedAccessException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status403Forbidden); }
             catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
             catch (InvalidOperationException ex) { return Results.Conflict(new { error = ex.Message }); }
@@ -157,6 +173,21 @@ public static class LeaveRequestEndpoints
             }
             catch (MinimumNoticeValidationException ex) { return Results.BadRequest(ToMinimumNoticeError(ex)); }
             catch (MaximumRequestDaysValidationException ex) { return Results.BadRequest(ToMaximumRequestDaysError(ex)); }
+            catch (RequiredDocumentValidationException ex) { return Results.BadRequest(ToRequiredDocumentError(ex)); }
+            catch (UnauthorizedAccessException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status403Forbidden); }
+            catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+            catch (InvalidOperationException ex) { return Results.Conflict(new { error = ex.Message }); }
+        }).WithTags("Leave Requests");
+
+        app.MapPost("/api/users/{userId:guid}/leave-requests/drafts", async (Guid userId, CreateLeaveRequestCommand command, ICurrentActor actor, AuthorizationService authorization, LeaveRequestService service, CancellationToken cancellationToken) =>
+        {
+            if (actor.UserId is not { } actorId) return Results.Unauthorized();
+            if (!await authorization.CanUserPerformGlobalAsync(actorId, PermissionCodes.LeaveRequestsCreateForOthers, cancellationToken)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+            try
+            {
+                var created = await service.CreateDraftForUserAsync(userId, command, cancellationToken);
+                return Results.Created($"/api/leave-requests/{created.Id}", created);
+            }
             catch (UnauthorizedAccessException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status403Forbidden); }
             catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
             catch (InvalidOperationException ex) { return Results.Conflict(new { error = ex.Message }); }
@@ -193,5 +224,12 @@ public static class LeaveRequestEndpoints
             Licenses.Domain.LeaveManagement.PolicyDayCountMode.BusinessDays => "BUSINESS_DAYS",
             _ => ex.DayCountMode.ToString().ToUpperInvariant()
         }
+    };
+
+    private static object ToRequiredDocumentError(RequiredDocumentValidationException ex) => new
+    {
+        error = ex.Message,
+        code = ex.Code,
+        requiredDocumentKind = LeaveRequestDocumentService.ToKind(ex.RequiredDocumentKind)
     };
 }

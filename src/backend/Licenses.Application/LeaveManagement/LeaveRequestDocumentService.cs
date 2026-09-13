@@ -29,8 +29,8 @@ public sealed class LeaveRequestDocumentService(ILeaveRequestRepository reposito
     {
         var actorId = RequireActor();
         var request = await repository.GetAsync(leaveRequestId, tracking: false, cancellationToken);
-        if (request is null || request.UserId != actorId) return null;
-        if (!await authorization.CanUserPerformGlobalAsync(actorId, PermissionCodes.LeaveDocumentsUploadSelf, cancellationToken)) throw new UnauthorizedAccessException("Actor cannot upload own leave request documents.");
+        if (request is null) return null;
+        if (!await CanUploadDocumentsAsync(actorId, request, cancellationToken)) throw new UnauthorizedAccessException("Actor cannot upload leave request documents.");
         if (declaredLength is <= 0) throw new ArgumentException("File is empty.", nameof(declaredLength));
         if (declaredLength > maxUploadSizeBytes) throw new ArgumentException("File exceeds the configured maximum upload size.", nameof(declaredLength));
 
@@ -73,6 +73,16 @@ public sealed class LeaveRequestDocumentService(ILeaveRequestRepository reposito
     {
         if (request.UserId == actorId) return await authorization.CanUserPerformGlobalAsync(actorId, PermissionCodes.LeaveDocumentsReadSelf, cancellationToken);
         return await authorization.CanUserPerformAsync(actorId, PermissionCodes.LeaveDocumentsRead, request.OrgUnitId, cancellationToken);
+    }
+
+    private async Task<bool> CanUploadDocumentsAsync(Guid actorId, LeaveRequest request, CancellationToken cancellationToken)
+    {
+        if (request.UserId == actorId)
+            return await authorization.CanUserPerformGlobalAsync(actorId, PermissionCodes.LeaveDocumentsUploadSelf, cancellationToken);
+
+        return request.Status == LeaveRequestStatus.Draft
+            && request.CreatedByUserId == actorId
+            && await authorization.CanUserPerformAsync(actorId, PermissionCodes.LeaveRequestsCreateForOthers, request.OrgUnitId, cancellationToken);
     }
 
     private async Task<List<LeaveRequestDocumentDto>> ToDtosAsync(IEnumerable<LeaveRequestDocument> documents, CancellationToken cancellationToken)

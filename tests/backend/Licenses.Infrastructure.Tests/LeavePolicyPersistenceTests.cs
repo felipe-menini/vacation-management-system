@@ -72,6 +72,37 @@ public sealed class LeavePolicyPersistenceTests
     }
 
     [Fact]
+    public async Task PersistsOptionalRequiredDocumentKindAgainstPostgreSql()
+    {
+        await PostgreSqlTestDatabase.WithFreshDatabaseAsync(async db =>
+        {
+            var (_, _, policy, _) = await SeedPolicyAsync(db);
+            var now = DateTime.UtcNow;
+            var none = LeavePolicyVersion.CreateDraft(policy.Id, 1, new DateOnly(2026, 1, 1), null, PolicyDayCountMode.CalendarDays, true, null, PolicyDayCountMode.CalendarDays, null, PolicyOverlapBehavior.Block, false, null, null, now);
+            var required = LeavePolicyVersion.CreateDraft(policy.Id, 2, new DateOnly(2027, 1, 1), null, PolicyDayCountMode.CalendarDays, true, null, PolicyDayCountMode.CalendarDays, null, PolicyOverlapBehavior.Block, false, null, null, now, LeaveRequestDocumentKind.MedicalCertificate);
+
+            db.Set<LeavePolicyVersion>().AddRange(none, required);
+            await db.SaveChangesAsync();
+            db.ChangeTracker.Clear();
+
+            var versions = await db.Set<LeavePolicyVersion>().OrderBy(x => x.VersionNumber).ToListAsync();
+            Assert.Null(versions[0].RequiredDocumentKind);
+            Assert.Equal(LeaveRequestDocumentKind.MedicalCertificate, versions[1].RequiredDocumentKind);
+        });
+    }
+
+    [Fact]
+    public async Task RejectsUnknownRequiredDocumentKindAgainstPostgreSql()
+    {
+        await PostgreSqlTestDatabase.WithFreshDatabaseAsync(async db =>
+        {
+            var (_, _, policy, calendar) = await SeedPolicyAsync(db);
+
+            await Assert.ThrowsAsync<PostgresException>(() => InsertVersionAsync(db, policy.Id, 1, "DRAFT", new DateOnly(2026, 1, 1), null, false, null, null, calendar.Id, requiredDocumentKind: "UNKNOWN_DOCUMENT"));
+        });
+    }
+
+    [Fact]
     public async Task UsesRestrictDeletesForHistoricalPolicyRecordsAgainstPostgreSql()
     {
         await PostgreSqlTestDatabase.WithFreshDatabaseAsync(async db =>
@@ -133,12 +164,13 @@ public sealed class LeavePolicyPersistenceTests
         Guid? balanceBucketId,
         DateTime? publishedAtUtc,
         Guid? workingCalendarId,
-        string dayCountMode = "BUSINESS_DAYS") =>
+        string dayCountMode = "BUSINESS_DAYS",
+        string? requiredDocumentKind = null) =>
         db.Database.ExecuteSqlInterpolatedAsync($"""
             INSERT INTO licenses.leave_policy_versions
-                (id, leave_policy_id, version_number, status, effective_from, effective_to, day_count_mode, allow_half_day, minimum_notice_days, notice_day_count_mode, maximum_request_days, overlap_behavior, consumes_balance, balance_bucket_id, working_calendar_id, created_at_utc, updated_at_utc, published_at_utc)
+                (id, leave_policy_id, version_number, status, effective_from, effective_to, day_count_mode, allow_half_day, minimum_notice_days, notice_day_count_mode, maximum_request_days, required_document_kind, overlap_behavior, consumes_balance, balance_bucket_id, working_calendar_id, created_at_utc, updated_at_utc, published_at_utc)
             VALUES
-                ({Guid.NewGuid()}, {policyId}, {versionNumber}, {status}, {effectiveFrom}, {effectiveTo}, {dayCountMode}, true, 7, 'CALENDAR_DAYS', 15, 'BLOCK', {consumesBalance}, {balanceBucketId}, {workingCalendarId}, {DateTime.UtcNow}, {DateTime.UtcNow}, {publishedAtUtc});
+                ({Guid.NewGuid()}, {policyId}, {versionNumber}, {status}, {effectiveFrom}, {effectiveTo}, {dayCountMode}, true, 7, 'CALENDAR_DAYS', 15, {requiredDocumentKind}, 'BLOCK', {consumesBalance}, {balanceBucketId}, {workingCalendarId}, {DateTime.UtcNow}, {DateTime.UtcNow}, {publishedAtUtc});
             """);
 }
 
