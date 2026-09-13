@@ -15,10 +15,18 @@ public sealed class LeavePolicyDomainTests
     public void DraftVersionCanBeEditedAndPublishedVersionCannot()
     {
         var version = Draft();
-        version.UpdateDraft(new DateOnly(2026, 1, 2), null, PolicyDayCountMode.CalendarDays, false, 0, PolicyDayCountMode.CalendarDays, null, PolicyOverlapBehavior.Allow, false, null, null, DateTime.UtcNow);
+        version.UpdateDraft(new DateOnly(2026, 1, 2), null, PolicyDayCountMode.CalendarDays, false, 0, PolicyDayCountMode.CalendarDays, null, PolicyOverlapBehavior.Allow, false, null, null, DateTime.UtcNow, LeaveRequestDocumentKind.MedicalCertificate);
         version.Publish(DateTime.UtcNow);
         Assert.Equal(LeavePolicyVersionStatus.Published, version.Status);
+        Assert.Equal(LeaveRequestDocumentKind.MedicalCertificate, version.RequiredDocumentKind);
         Assert.Throws<InvalidOperationException>(() => version.UpdateDraft(new DateOnly(2026, 1, 3), null, PolicyDayCountMode.CalendarDays, false, null, PolicyDayCountMode.CalendarDays, null, PolicyOverlapBehavior.Allow, false, null, null, DateTime.UtcNow));
+    }
+
+    [Fact]
+    public void DraftVersionAcceptsOptionalRequiredDocumentKind()
+    {
+        Assert.Null(Draft(requiredDocumentKind: null).RequiredDocumentKind);
+        Assert.Equal(LeaveRequestDocumentKind.MedicalCertificate, Draft(requiredDocumentKind: LeaveRequestDocumentKind.MedicalCertificate).RequiredDocumentKind);
     }
 
     [Fact]
@@ -33,7 +41,7 @@ public sealed class LeavePolicyDomainTests
         Assert.Throws<ArgumentOutOfRangeException>(() => LeavePolicyVersion.CreateDraft(Guid.NewGuid(), 0, new DateOnly(2026, 1, 1), null, PolicyDayCountMode.BusinessDays, true, null, PolicyDayCountMode.CalendarDays, null, PolicyOverlapBehavior.Block, false, null, null, DateTime.UtcNow));
     }
 
-    private static LeavePolicyVersion Draft(DateOnly? effectiveFrom = null, DateOnly? effectiveTo = null, int? minimumNoticeDays = null, decimal? maximumRequestDays = 1, bool consumesBalance = false, Guid? balanceBucketId = null) =>
-        LeavePolicyVersion.CreateDraft(Guid.NewGuid(), 1, effectiveFrom ?? new DateOnly(2026, 1, 1), effectiveTo, PolicyDayCountMode.BusinessDays, true, minimumNoticeDays, PolicyDayCountMode.CalendarDays, maximumRequestDays, PolicyOverlapBehavior.Block, consumesBalance, balanceBucketId, Guid.NewGuid(), DateTime.UtcNow);
+    private static LeavePolicyVersion Draft(DateOnly? effectiveFrom = null, DateOnly? effectiveTo = null, int? minimumNoticeDays = null, decimal? maximumRequestDays = 1, bool consumesBalance = false, Guid? balanceBucketId = null, LeaveRequestDocumentKind? requiredDocumentKind = null) =>
+        LeavePolicyVersion.CreateDraft(Guid.NewGuid(), 1, effectiveFrom ?? new DateOnly(2026, 1, 1), effectiveTo, PolicyDayCountMode.BusinessDays, true, minimumNoticeDays, PolicyDayCountMode.CalendarDays, maximumRequestDays, PolicyOverlapBehavior.Block, consumesBalance, balanceBucketId, Guid.NewGuid(), DateTime.UtcNow, requiredDocumentKind);
 }
 

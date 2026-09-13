@@ -49,33 +49,81 @@ public sealed class LeaveRequestDocumentAuditTests
         Assert.Empty(setup.Audit.Events);
     }
 
+    [Fact]
+    public async Task ManualCreateForOtherCreatorCanUploadToDraftWithoutReadGrant()
+    {
+        var setup = DocumentSetup.Create();
+        var request = LeaveRequest.CreateDraft(setup.Employee.Id, setup.Unit.Id, setup.Type.Id, new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 1), LeaveRequestDayPortion.FullDay, null, setup.Manager.Id, Now);
+        await setup.Requests.AddAsync(request, CancellationToken.None);
+        var service = setup.CreateService(setup.Manager.Id, PermissionCodes.LeaveRequestsCreateForOthers);
+
+        var uploaded = await service.UploadAsync(request.Id, "medical.pdf", "application/pdf", PdfStream(), null, 1024, CancellationToken.None);
+        var deniedRead = await service.OpenContentAsync(uploaded!.Id, CancellationToken.None);
+
+        Assert.NotNull(uploaded);
+        Assert.Null(deniedRead);
+        Assert.Single(setup.Audit.Events);
+        Assert.Equal("leave.document.upload", setup.Audit.Events[0].Action);
+        Assert.Equal(setup.Manager.Id, setup.Audit.Events[0].ActorUserId);
+        Assert.Equal(setup.Employee.Id, setup.Audit.Events[0].SubjectUserId);
+        Assert.DoesNotContain("StorageKey", setup.Audit.Events[0].MetadataJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("storage", setup.Audit.Events[0].MetadataJson, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ManualCreateForOtherUploadRejectsOutOfScopeAndTechAdminActors()
+    {
+        var setup = DocumentSetup.Create();
+        var request = LeaveRequest.CreateDraft(setup.Employee.Id, setup.Unit.Id, setup.Type.Id, new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 1), LeaveRequestDayPortion.FullDay, null, setup.OutOfScopeManager.Id, Now);
+        await setup.Requests.AddAsync(request, CancellationToken.None);
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => setup.CreateService(setup.OutOfScopeManager.Id, PermissionCodes.LeaveRequestsCreateForOthers).UploadAsync(request.Id, "medical.pdf", "application/pdf", PdfStream(), null, 1024, CancellationToken.None));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => setup.CreateService(setup.TechAdmin.Id, "system.tech_admin").UploadAsync(request.Id, "medical.pdf", "application/pdf", PdfStream(), null, 1024, CancellationToken.None));
+
+        Assert.Empty(setup.Audit.Events);
+    }
+
+    [Fact]
+    public async Task ManualCreateForOtherUploadRequiresDraftStatus()
+    {
+        var setup = DocumentSetup.Create();
+        var request = LeaveRequest.CreateDraft(setup.Employee.Id, setup.Unit.Id, setup.Type.Id, new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 1), LeaveRequestDayPortion.FullDay, null, setup.Manager.Id, Now);
+        request.Submit(Guid.NewGuid(), 1m, null, null, Now, Guid.NewGuid());
+        await setup.Requests.AddAsync(request, CancellationToken.None);
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => setup.CreateService(setup.Manager.Id, PermissionCodes.LeaveRequestsCreateForOthers).UploadAsync(request.Id, "medical.pdf", "application/pdf", PdfStream(), null, 1024, CancellationToken.None));
+
+        Assert.Empty(setup.Audit.Events);
+    }
+
     private static MemoryStream PdfStream() => new("%PDF-1.7 test"u8.ToArray());
 
-    private sealed record DocumentSetup(User Employee, User OutOfScopeManager, User TechAdmin, OrgUnit Unit, OrgUnit OtherUnit, LeaveType Type, LeaveRequest Request, FakeLeaveRequestRepository Requests, FakePrivateDocumentStorage Storage, FakeAuditWriter Audit)
+    private sealed record DocumentSetup(User Employee, User Manager, User OutOfScopeManager, User TechAdmin, OrgUnit Unit, OrgUnit OtherUnit, LeaveType Type, LeaveRequest Request, FakeLeaveRequestRepository Requests, FakePrivateDocumentStorage Storage, FakeAuditWriter Audit)
     {
         public static DocumentSetup Create()
         {
             var employee = User.Create("Employee", $"employee.{Guid.NewGuid():N}@example.test", null, Now);
             var manager = User.Create("Manager", $"manager.{Guid.NewGuid():N}@example.test", null, Now);
+            var outOfScopeManager = User.Create("Out of Scope Manager", $"out.{Guid.NewGuid():N}@example.test", null, Now);
             var techAdmin = User.Create("Tech Admin", $"tech.{Guid.NewGuid():N}@example.test", null, Now);
             var unit = OrgUnit.Create("Engineering", "ENG" + Guid.NewGuid().ToString("N")[..8], null, Now);
             var otherUnit = OrgUnit.Create("Finance", "FIN" + Guid.NewGuid().ToString("N")[..8], null, Now);
             var type = LeaveType.Create("SICK" + Guid.NewGuid().ToString("N")[..8], "Sick Leave", null, 1, true, Now);
             var request = LeaveRequest.CreateDraft(employee.Id, unit.Id, type.Id, new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 1), LeaveRequestDayPortion.FullDay, null, employee.Id, Now);
-            var requests = new FakeLeaveRequestRepository(employee, manager, techAdmin, unit, otherUnit, type, request);
+            var requests = new FakeLeaveRequestRepository(employee, manager, outOfScopeManager, techAdmin, unit, otherUnit, type, request);
             var storage = new FakePrivateDocumentStorage();
             var audit = new FakeAuditWriter();
-            return new(employee, manager, techAdmin, unit, otherUnit, type, request, requests, storage, audit);
+            return new(employee, manager, outOfScopeManager, techAdmin, unit, otherUnit, type, request, requests, storage, audit);
         }
 
         public LeaveRequestDocumentService CreateService(Guid actorId, params string[] permissions)
         {
-            var auth = new AuthorizationService(new FakeAuthorizationRepository(actorId, Employee, OutOfScopeManager, TechAdmin, Unit, OtherUnit, permissions), new FixedTimeProvider(Now));
+            var auth = new AuthorizationService(new FakeAuthorizationRepository(actorId, Employee, Manager, OutOfScopeManager, TechAdmin, Unit, OtherUnit, permissions), new FixedTimeProvider(Now));
             return new LeaveRequestDocumentService(Requests, Storage, auth, new FixedCurrentActor(actorId), new FixedTimeProvider(Now), Audit);
         }
     }
 
-    private sealed class FakeLeaveRequestRepository(User employee, User manager, User techAdmin, OrgUnit unit, OrgUnit otherUnit, LeaveType type, LeaveRequest request) : ILeaveRequestRepository
+    private sealed class FakeLeaveRequestRepository(User employee, User manager, User outOfScopeManager, User techAdmin, OrgUnit unit, OrgUnit otherUnit, LeaveType type, LeaveRequest request) : ILeaveRequestRepository
     {
         private readonly List<LeaveRequest> _requests = [request];
         private readonly List<LeaveRequestDocument> _documents = [];
@@ -90,6 +138,7 @@ public sealed class LeaveRequestDocumentAuditTests
         public Task<LeaveRequestDocument?> GetDocumentAsync(Guid id, bool tracking, CancellationToken ct) => Task.FromResult(_documents.SingleOrDefault(x => x.Id == id));
         public Task<IReadOnlyList<LeaveRequestDocument>> ListDocumentsByRequestIdAsync(Guid requestId, CancellationToken ct) => Task.FromResult<IReadOnlyList<LeaveRequestDocument>>(_documents.Where(x => x.LeaveRequestId == requestId).ToList());
         public Task<IReadOnlyList<LeaveRequestDocument>> ListDocumentsByRequestIdsAsync(IReadOnlyCollection<Guid> ids, CancellationToken ct) => Task.FromResult<IReadOnlyList<LeaveRequestDocument>>(_documents.Where(x => ids.Contains(x.LeaveRequestId)).ToList());
+        public Task<bool> HasDocumentOfKindAsync(Guid requestId, LeaveRequestDocumentKind kind, CancellationToken ct) => Task.FromResult(_documents.Any(x => x.LeaveRequestId == requestId && x.Kind == kind));
         public Task AddDocumentAsync(LeaveRequestDocument document, CancellationToken ct) { _documents.Add(document); return Task.CompletedTask; }
         public Task<LeaveRequestDecision?> GetDecisionByOperationIdAsync(Guid operationId, CancellationToken ct) => Task.FromResult<LeaveRequestDecision?>(null);
         public Task<LeaveRequestDecision?> GetDecisionByRequestIdAsync(Guid requestId, CancellationToken ct) => Task.FromResult<LeaveRequestDecision?>(null);
@@ -105,7 +154,7 @@ public sealed class LeaveRequestDocumentAuditTests
         public Task AddDecisionAsync(LeaveRequestDecision decision, CancellationToken ct) => Task.CompletedTask;
         public Task AddCancellationAsync(LeaveRequestCancellation cancellation, CancellationToken ct) => Task.CompletedTask;
         public Task AddRevocationAsync(LeaveRequestRevocation revocation, CancellationToken ct) => Task.CompletedTask;
-        public Task<User?> GetUserAsync(Guid id, CancellationToken ct) => Task.FromResult<User?>(id == employee.Id ? employee : id == manager.Id ? manager : id == techAdmin.Id ? techAdmin : null);
+        public Task<User?> GetUserAsync(Guid id, CancellationToken ct) => Task.FromResult<User?>(id == employee.Id ? employee : id == manager.Id ? manager : id == outOfScopeManager.Id ? outOfScopeManager : id == techAdmin.Id ? techAdmin : null);
         public Task<OrgUnit?> GetOrgUnitAsync(Guid id, CancellationToken ct) => Task.FromResult<OrgUnit?>(id == unit.Id ? unit : id == otherUnit.Id ? otherUnit : null);
         public Task<LeaveType?> GetLeaveTypeAsync(Guid id, CancellationToken ct) => Task.FromResult<LeaveType?>(id == type.Id ? type : null);
         public Task<LeavePolicy?> GetPolicyAsync(Guid id, CancellationToken ct) => Task.FromResult<LeavePolicy?>(null);
@@ -114,23 +163,23 @@ public sealed class LeaveRequestDocumentAuditTests
         public Task<Guid?> GetBalanceAccountIdAsync(Guid userId, Guid balanceBucketId, CancellationToken ct) => Task.FromResult<Guid?>(null);
         public Task<bool> HasEffectiveAssignmentAsync(Guid userId, Guid orgUnitId, DateOnly date, CancellationToken ct) => Task.FromResult(true);
         public Task<IReadOnlyList<LeaveRequest>> ListOverlappingAsync(Guid userId, DateOnly start, DateOnly end, Guid excluding, CancellationToken ct) => Task.FromResult<IReadOnlyList<LeaveRequest>>([]);
-        public Task<IReadOnlyList<User>> ListUsersInOrgUnitsAsync(IReadOnlyCollection<Guid> ids, DateTime now, CancellationToken ct) => Task.FromResult<IReadOnlyList<User>>([employee, manager, techAdmin]);
+        public Task<IReadOnlyList<User>> ListUsersInOrgUnitsAsync(IReadOnlyCollection<Guid> ids, DateTime now, CancellationToken ct) => Task.FromResult<IReadOnlyList<User>>([employee, manager, outOfScopeManager, techAdmin]);
         public Task<IDisposable> BeginTransactionAsync(CancellationToken ct) => Task.FromResult<IDisposable>(new NoopTransaction());
         public Task SaveChangesAsync(CancellationToken ct) => Task.CompletedTask;
         public Task CommitTransactionAsync(CancellationToken ct) => Task.CompletedTask;
     }
 
-    private sealed class FakeAuthorizationRepository(Guid actorId, User employee, User manager, User techAdmin, OrgUnit unit, OrgUnit otherUnit, string[] permissions) : IAuthorizationRepository
+    private sealed class FakeAuthorizationRepository(Guid actorId, User employee, User manager, User outOfScopeManager, User techAdmin, OrgUnit unit, OrgUnit otherUnit, string[] permissions) : IAuthorizationRepository
     {
         private readonly Guid _roleId = Guid.NewGuid();
-        public Task<User?> GetUserAsync(Guid id, CancellationToken ct) => Task.FromResult<User?>(id == employee.Id ? employee : id == manager.Id ? manager : id == techAdmin.Id ? techAdmin : null);
+        public Task<User?> GetUserAsync(Guid id, CancellationToken ct) => Task.FromResult<User?>(id == employee.Id ? employee : id == manager.Id ? manager : id == outOfScopeManager.Id ? outOfScopeManager : id == techAdmin.Id ? techAdmin : null);
         public Task<OrgUnit?> GetOrgUnitAsync(Guid id, CancellationToken ct) => Task.FromResult<OrgUnit?>(id == unit.Id ? unit : id == otherUnit.Id ? otherUnit : null);
         public Task<List<OrgUnit>> ListOrgUnitsAsync(CancellationToken ct) => Task.FromResult(new List<OrgUnit> { unit, otherUnit });
-        public Task<List<UserOrgAssignment>> ListActiveUserOrgAssignmentsAsync(Guid id, DateTime now, CancellationToken ct) => Task.FromResult(new List<UserOrgAssignment> { UserOrgAssignment.Create(id, id == manager.Id ? otherUnit.Id : unit.Id, true, Now.AddDays(-1), null) });
-        public Task<List<RoleScopeAssignment>> ListActiveRoleScopeAssignmentsAsync(Guid id, DateTime now, CancellationToken ct) => Task.FromResult(id == actorId ? new List<RoleScopeAssignment> { RoleScopeAssignment.Create(id, _roleId, id == manager.Id ? otherUnit.Id : unit.Id, false, Now.AddDays(-1), null) } : []);
+        public Task<List<UserOrgAssignment>> ListActiveUserOrgAssignmentsAsync(Guid id, DateTime now, CancellationToken ct) => Task.FromResult(new List<UserOrgAssignment> { UserOrgAssignment.Create(id, id == outOfScopeManager.Id ? otherUnit.Id : unit.Id, true, Now.AddDays(-1), null) });
+        public Task<List<RoleScopeAssignment>> ListActiveRoleScopeAssignmentsAsync(Guid id, DateTime now, CancellationToken ct) => Task.FromResult(id == actorId ? new List<RoleScopeAssignment> { RoleScopeAssignment.Create(id, _roleId, id == outOfScopeManager.Id ? otherUnit.Id : unit.Id, false, Now.AddDays(-1), null) } : []);
         public Task<bool> RoleHasPermissionAsync(Guid roleId, string code, CancellationToken ct) => Task.FromResult(roleId == _roleId && permissions.Contains(code));
         public Task<bool> IsRoleActiveAsync(Guid roleId, CancellationToken ct) => Task.FromResult(roleId == _roleId);
-        public Task<List<User>> ListUsersInOrgUnitsAsync(IReadOnlyCollection<Guid> ids, DateTime now, CancellationToken ct) => Task.FromResult(new List<User> { employee, manager, techAdmin }.Where(user => user.Id != manager.Id || ids.Contains(otherUnit.Id)).ToList());
+        public Task<List<User>> ListUsersInOrgUnitsAsync(IReadOnlyCollection<Guid> ids, DateTime now, CancellationToken ct) => Task.FromResult(new List<User> { employee, manager, outOfScopeManager, techAdmin }.Where(user => user.Id != outOfScopeManager.Id || ids.Contains(otherUnit.Id)).ToList());
         public Task<List<DevelopmentActorDto>> ListDevelopmentActorsAsync(DateTime now, CancellationToken ct) => Task.FromResult(new List<DevelopmentActorDto>());
     }
 

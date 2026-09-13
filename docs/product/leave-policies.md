@@ -13,7 +13,7 @@ Leave rules must be configurable and versioned. A request keeps the effective po
 | Duration | Minimum per request; maximum consecutive duration; annual maximum; allowed fractioning. |
 | Approval | Whether approval is required; number of levels; supervisor, encargado, RRHH; sequential or parallel flow; future conditional auto-approval. |
 | Cancellation | Allowed window; approval requirement; balance refund; future partial cancellation. |
-| Attachments | Required/optional; threshold after N days; MIME types; maximum size; classification and visibility. |
+| Attachments | Optional or required supporting document kind; threshold after N days; MIME types; maximum size; classification and visibility. |
 | Team capacity | Maximum simultaneous absences by unit; minimum staff available; warn or block behavior. |
 | Carry-over / validity | Accrual, expiration, maximum transferable amount, and grace period. |
 
@@ -72,7 +72,11 @@ The implemented policy model now separates stable `LeavePolicy` records from eff
 
 Published versions are immutable and resolver-visible. Draft versions can be edited but never resolve. Published periods for the same policy must not overlap. Policy resolution prefers the deepest applicable OrgUnit override and then falls back to the company-wide LeaveType policy. A future LeaveRequest must reference the exact published `LeavePolicyVersion` used during evaluation.
 
-EP-04 stores day count mode, half-day allowance, notice days/mode, maximum request days, overlap behavior, and balance consumption bucket. Later EPs added working-calendar day calculation, leave requests, approvals, balance ledger integration, documents, audit, minimum-notice enforcement, and maximum-request-days enforcement on submission. Carry-over, expiry automation, Entra, SharePoint, and capacity remain deferred.
+EP-04 stores day count mode, half-day allowance, notice days/mode, maximum request days, overlap behavior, and balance consumption bucket. Later EPs added working-calendar day calculation, leave requests, approvals, balance ledger integration, documents, audit, minimum-notice enforcement, maximum-request-days enforcement, and required-document enforcement on submission. Carry-over, expiry automation, Entra, SharePoint, and capacity remain deferred.
+
+## Implemented EP-17 required-document policy rule
+
+`LeavePolicyVersion.RequiredDocumentKind` is a versioned, nullable policy rule. `null` means no supporting document is required, and `MEDICAL_CERTIFICATE` is the current supported concrete kind. Draft policy versions can set or clear the requirement; published versions remain immutable. The rule is not derived from `LeaveType` codes, so document requirements stay explicit policy configuration.
 
 ## Implemented EP-05 working-calendar slice
 

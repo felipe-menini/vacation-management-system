@@ -39,7 +39,7 @@ erDiagram
 | `LeaveType` | User-visible leave type catalog entry. Policy versions decide whether a leave type consumes a balance bucket. |
 | `LeavePolicy` | Stable company-wide or OrgUnit-scoped policy definition for a leave type. |
 | `BalanceBucketType` | Balance concept such as vacation, study leave, or medical exams. |
-| `LeavePolicyVersion` | Effective dated rule set for a leave type and optionally a unit. |
+| `LeavePolicyVersion` | Effective dated rule set for a leave type and optionally a unit, including nullable required document kind. |
 | `WorkingCalendar` | Stable configurable working calendar with weekday rules and dated exceptions. |
 | `LeaveRequest` | Request with dates, AM/PM segments, calculated days, applied policy version, and state. |
 | `LeaveRequestDay` | Optional per-day detail for complex calculation and half-days. |
@@ -105,6 +105,10 @@ Approval and rejection use explicit domain operations, not a generic status sett
 ## Implemented leave request documents
 
 EP-10 adds `LeaveRequestDocument` as immutable metadata for private leave-request attachments. EP-10 supports `MEDICAL_CERTIFICATE`; future document kinds can add new controlled values without changing storage internals. Document bytes are not part of the domain model and are retrieved only through a private storage abstraction.
+
+## Implemented EP-17 required document model
+
+`LeavePolicyVersion.RequiredDocumentKind` stores the required supporting document kind for that exact policy version. `null` means no document is required. The first supported value is `MEDICAL_CERTIFICATE`. Because the value lives on the policy version, published-version immutability protects historical request semantics and avoids hardcoding requirements from leave-type codes.
 
 ## Implemented audit event model
 

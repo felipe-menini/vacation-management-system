@@ -122,6 +122,27 @@ public sealed class LeaveRequestService(ILeaveRequestRepository repository, ILea
         return result;
     }
 
+    public async Task<LeaveRequestDto> CreateDraftForUserAsync(Guid userId, CreateLeaveRequestCommand command, CancellationToken cancellationToken)
+    {
+        var actorId = RequireActor();
+        var target = await repository.GetUserAsync(userId, cancellationToken) ?? throw new InvalidOperationException("Target user does not exist.");
+        if (!target.IsActive) throw new InvalidOperationException("Target user is inactive.");
+        if (!await authorization.CanUserPerformAsync(actorId, PermissionCodes.LeaveRequestsCreateForOthers, command.OrgUnitId, cancellationToken)) throw new UnauthorizedAccessException("Actor cannot create leave requests for this organizational scope.");
+
+        await ValidateDraftBasicsAsync(userId, command.OrgUnitId, command.LeaveTypeId, command.StartDate, command.EndDate, cancellationToken);
+        var request = LeaveRequest.CreateDraft(userId, command.OrgUnitId, command.LeaveTypeId, command.StartDate, command.EndDate, ParseDayPortion(command.DayPortion), command.Comment, actorId, UtcNow());
+        await repository.AddAsync(request, cancellationToken);
+        await WriteLeaveRequestAuditAsync("leave.request.create_for_other", request, actorId, null, new
+        {
+            subjectUserId = request.UserId,
+            createdByDiffersFromSubject = true,
+            resultingStatus = ToStatus(request.Status),
+            leaveTypeId = request.LeaveTypeId
+        }, cancellationToken);
+        await repository.SaveChangesAsync(cancellationToken);
+        return (await ToDtosAsync([request], cancellationToken)).Single();
+    }
+
     public async Task<SubmitLeaveRequestResultDto?> SubmitAsync(Guid id, CancellationToken cancellationToken)
     {
         var actorId = RequireActor();
@@ -141,6 +162,26 @@ public sealed class LeaveRequestService(ILeaveRequestRepository repository, ILea
         return result;
     }
 
+    public async Task<SubmitLeaveRequestResultDto?> SubmitForUserAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var actorId = RequireActor();
+        using var _ = await repository.BeginTransactionAsync(cancellationToken);
+        var request = await repository.GetForUpdateAsync(id, cancellationToken);
+        if (request is null || request.UserId == actorId) return null;
+        if (request.CreatedByUserId != actorId) throw new UnauthorizedAccessException("Actor cannot submit this manually-created leave request.");
+        if (!await authorization.CanUserPerformAsync(actorId, PermissionCodes.LeaveRequestsCreateForOthers, request.OrgUnitId, cancellationToken)) throw new UnauthorizedAccessException("Actor cannot submit leave requests for this organizational scope.");
+        if (request.Status == LeaveRequestStatus.PendingApproval)
+        {
+            await repository.CommitTransactionAsync(cancellationToken);
+            return new((await ToDtosAsync([request], cancellationToken)).Single(), [], WasAlreadySubmitted: true);
+        }
+        if (request.Status != LeaveRequestStatus.Draft) throw new InvalidOperationException("Only DRAFT leave requests can be submitted.");
+
+        var result = await SubmitLockedAsync(request, request.EnsureReservationOperationId(), "leave.request.submit", cancellationToken);
+        await repository.CommitTransactionAsync(cancellationToken);
+        return result;
+    }
+
     private async Task<SubmitLeaveRequestResultDto> SubmitLockedAsync(LeaveRequest request, Guid submissionOperationId, string auditAction, CancellationToken cancellationToken)
     {
         await ValidateDraftBasicsAsync(request.UserId, request.OrgUnitId, request.LeaveTypeId, request.StartDate, request.EndDate, cancellationToken);
@@ -148,6 +189,7 @@ public sealed class LeaveRequestService(ILeaveRequestRepository repository, ILea
         if (!resolved.Found || resolved.Version is null) throw new InvalidOperationException(resolved.Reason ?? "No published applicable policy exists.");
         var version = await repository.GetPolicyVersionAsync(resolved.Version.Id, cancellationToken) ?? throw new InvalidOperationException("Resolved policy version does not exist.");
 
+        await EnforceRequiredDocumentAsync(request, version, cancellationToken);
         await EnforceMinimumNoticeAsync(request, version, cancellationToken);
         var calculatedDays = await CalculateAsync(request, version, cancellationToken);
         if (version.MaximumRequestDays is { } maximumRequestDays && calculatedDays > maximumRequestDays)
@@ -215,6 +257,13 @@ public sealed class LeaveRequestService(ILeaveRequestRepository repository, ILea
 
         if (notice.NoticeDays < version.MinimumNoticeDays.Value)
             throw MinimumNoticeValidationException.Insufficient(version.MinimumNoticeDays.Value, notice.NoticeDays, notice.NoticeDayCountMode, notice.BusinessToday);
+    }
+
+    private async Task EnforceRequiredDocumentAsync(LeaveRequest request, LeavePolicyVersion version, CancellationToken cancellationToken)
+    {
+        if (version.RequiredDocumentKind is not { } requiredDocumentKind) return;
+        if (!await repository.HasDocumentOfKindAsync(request.Id, requiredDocumentKind, cancellationToken))
+            throw RequiredDocumentValidationException.Missing(requiredDocumentKind);
     }
 
     public Task<DecideLeaveRequestResultDto?> ApproveAsync(Guid id, DecideLeaveRequestCommand command, CancellationToken cancellationToken) =>

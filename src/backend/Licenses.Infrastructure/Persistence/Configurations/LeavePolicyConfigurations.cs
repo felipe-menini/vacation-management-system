@@ -1,3 +1,4 @@
+using Licenses.Application.LeaveManagement;
 using Licenses.Domain.LeaveManagement;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
@@ -44,6 +45,7 @@ public sealed class LeavePolicyVersionConfiguration : IEntityTypeConfiguration<L
         builder.Property(x => x.MinimumNoticeDays).HasColumnName("minimum_notice_days");
         builder.Property(x => x.NoticeDayCountMode).HasColumnName("notice_day_count_mode").HasMaxLength(32).HasConversion(x => ToDayCount(x), x => FromDayCount(x)).IsRequired();
         builder.Property(x => x.MaximumRequestDays).HasColumnName("maximum_request_days").HasPrecision(8, 2);
+        builder.Property(x => x.RequiredDocumentKind).HasColumnName("required_document_kind").HasMaxLength(64).HasConversion(x => x == null ? null : LeaveRequestDocumentService.ToKind(x.Value), x => x == null ? null : LeaveRequestDocumentService.FromKind(x));
         builder.Property(x => x.OverlapBehavior).HasColumnName("overlap_behavior").HasMaxLength(16).HasConversion(x => ToOverlap(x), x => FromOverlap(x)).IsRequired();
         builder.Property(x => x.ConsumesBalance).HasColumnName("consumes_balance").IsRequired();
         builder.Property(x => x.BalanceBucketId).HasColumnName("balance_bucket_id");
@@ -61,6 +63,7 @@ public sealed class LeavePolicyVersionConfiguration : IEntityTypeConfiguration<L
             t.HasCheckConstraint("ck_leave_policy_versions_day_count_mode", "day_count_mode IN ('BUSINESS_DAYS','CALENDAR_DAYS')");
             t.HasCheckConstraint("ck_leave_policy_versions_notice_day_count_mode", "notice_day_count_mode IN ('BUSINESS_DAYS','CALENDAR_DAYS')");
             t.HasCheckConstraint("ck_leave_policy_versions_overlap_behavior", "overlap_behavior IN ('BLOCK','WARN','ALLOW')");
+            t.HasCheckConstraint("ck_leave_policy_versions_required_document_kind", "required_document_kind IS NULL OR required_document_kind IN ('MEDICAL_CERTIFICATE')");
             t.HasCheckConstraint("ck_leave_policy_versions_version_positive", "version_number > 0");
             t.HasCheckConstraint("ck_leave_policy_versions_effective_range", "effective_to IS NULL OR effective_to >= effective_from");
             t.HasCheckConstraint("ck_leave_policy_versions_min_notice_non_negative", "minimum_notice_days IS NULL OR minimum_notice_days >= 0");

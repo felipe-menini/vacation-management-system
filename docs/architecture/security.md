@@ -29,7 +29,7 @@ Medical certificates and sensitive attachments must:
 - never expose permanent public URLs
 - use encryption in transit and at rest
 - validate MIME type, extension, size, and safe file names
-- pass malware scanning before download/view access is enabled
+- pass malware scanning before download/view access is enabled in a future hardening slice
 - be accessed only through backend authorization or short-lived delegated URLs
 - audit view/download attempts
 - follow retention and deletion policy defined with RRHH/Legal, not hardcoded
@@ -64,3 +64,7 @@ Technical logs support operations and troubleshooting and may rotate. Business a
 EP-12A provides the backend persistence/writer foundation for audit events. Audit answers who did what to which resource, when, and with what minimal context. It is not the source of business truth for balances, approvals, cancellations, revocations, or outbox processing; those remain in their dedicated history tables.
 
 Audit metadata must be intentionally small and privacy-safe. Do not store passwords, tokens, cookies, authorization headers, medical document bytes, private storage keys, uploaded files, complete EF entities, or unnecessary sensitive personal data. Sensitive document access auditing is planned for EP-12B. Audit viewer/search authorization is planned for EP-12C. Retention remains a future RRHH/Legal/compliance decision.
+
+## Implemented EP-17 required-document privacy boundary
+
+Required-document submission validation checks only persisted document metadata and never reopens private storage merely to prove presence. Upload audit metadata remains privacy-safe and excludes medical file content and storage keys. Manual create-for-other upload authority is limited to the original creator while the request is still `DRAFT` and scoped authority still exists; it does not grant read/download authority.

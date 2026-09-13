@@ -10,7 +10,7 @@ A DRAFT may be edited by its owner. Once submitted, core request fields, the fro
 
 ## Submission
 
-Submission is transactional. The backend revalidates leave type activity, the stored OrgUnit assignment at StartDate, date order, effective published policy, policy request rules, overlaps, and balance reservation.
+Submission is transactional. The backend revalidates leave type activity, the stored OrgUnit assignment at StartDate, date order, effective published policy, required supporting document metadata, policy request rules, overlaps, and balance reservation.
 
 Policy resolution uses StartDate. The exact LeavePolicyVersionId is frozen on the request, and CalculatedDays is stored as the evaluated quantity. Future policy or WorkingCalendar changes must not silently recalculate a submitted request.
 
@@ -58,16 +58,18 @@ Only `APPROVED` requests auto-complete. Requests in `CANCELLATION_REQUESTED` sta
 
 ## Manual creation for others
 
-EP-09 allows authorized actors to create a leave request for another employee inside scope. The operation immediately reuses normal submission behavior: assignment validation, policy resolution, calculation, overlap checks, balance reservation, and idempotency. A successful manual create-for-others finishes as `PENDING_APPROVAL`; it does not auto-approve.
+EP-09 introduced the atomic create-and-submit endpoint for authorized actors creating a leave request for another employee inside scope. EP-17 keeps that endpoint for compatibility, but it cannot bypass required-document policies.
+
+The frontend now uses a draft-first manual flow: create a `DRAFT` for the target employee, upload required supporting documents while the original creator still has scoped `leave.requests.create.for_others` authority, then call submit-for-other. Submit-for-other reuses normal submission behavior: assignment validation, policy resolution, required-document validation, calculation, overlap checks, balance reservation, and idempotency. A successful manual submission finishes as `PENDING_APPROVAL`; it does not auto-approve.
 
 ## Authorization
 
 Employees can create, edit, submit, list, read, and request cancellation of their own requests. Supervisor, Manager, and HR may read, decide, resolve cancellations, revoke, and create requests for others inside organizational scope when granted the corresponding permissions. Technical administrators receive no automatic business request permission.
 
-MinimumNoticeDays and MaximumRequestDays are enforced by the backend at submission. Draft creation/editing may temporarily violate notice or maximum-duration rules. MaximumRequestDays uses the backend-calculated request quantity, including WorkingCalendar-derived business days and existing half-day semantics. Manual create-for-others follows the same rules; no administrative or retroactive bypass exists yet. A failed notice or maximum-duration submission leaves the request in DRAFT and has no balance, audit, outbox, status, or approval-history side effects.
+`RequiredDocumentKind`, MinimumNoticeDays, and MaximumRequestDays are enforced by the backend at submission. Draft creation/editing may temporarily violate notice, maximum-duration, or document-presence rules. MaximumRequestDays uses the backend-calculated request quantity, including WorkingCalendar-derived business days and existing half-day semantics. Manual create-for-others follows the same rules; no administrative, retroactive, or required-document bypass exists yet. A failed notice, maximum-duration, or required-document submission leaves the request in DRAFT and has no balance, successful submit audit, outbox, status, frozen policy, calculated-days, or approval-history side effects.
 
 ## Private medical certificates
 
 EP-10 supports optional `MEDICAL_CERTIFICATE` attachments on leave requests. Documents remain associated with the request across APPROVED, REJECTED, CANCELLED, and REVOKED states. Uploading a document does not change status, recalculate days, re-resolve policy, mutate balances, or alter approval/cancellation history.
 
-Supported uploads are PDF, JPEG, and PNG up to the configured maximum size, with a Development default of 10 MB. The backend validates file extension, declared content type where detectable, magic bytes, non-empty content, and maximum size. OCR, antivirus scanning, previews, retention/deletion policy, and policy-required-document enforcement are deferred.
+Supported uploads are PDF, JPEG, and PNG up to the configured maximum size, with a Development default of 10 MB. The backend validates file extension, declared content type where detectable, magic bytes, non-empty content, and maximum size. EP-17 enforces policy-required `MEDICAL_CERTIFICATE` presence at submission by checking persisted document metadata. OCR, antivirus scanning, previews, retention/deletion policy, document approval/rejection, expiration, complex multiple-document requirement expressions, and bypass permissions are deferred.

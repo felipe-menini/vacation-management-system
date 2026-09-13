@@ -73,6 +73,9 @@ public sealed class EfLeaveRequestRepository(ApplicationDbContext dbContext) : I
     public Task<IReadOnlyList<LeaveRequestDocument>> ListDocumentsByRequestIdsAsync(IReadOnlyCollection<Guid> requestIds, CancellationToken cancellationToken) =>
         dbContext.LeaveRequestDocuments.AsNoTracking().Where(x => requestIds.Contains(x.LeaveRequestId)).OrderByDescending(x => x.CreatedAtUtc).ToListAsync(cancellationToken).ContinueWith(t => (IReadOnlyList<LeaveRequestDocument>)t.Result, cancellationToken);
 
+    public Task<bool> HasDocumentOfKindAsync(Guid requestId, LeaveRequestDocumentKind kind, CancellationToken cancellationToken) =>
+        dbContext.LeaveRequestDocuments.AsNoTracking().AnyAsync(x => x.LeaveRequestId == requestId && x.Kind == kind, cancellationToken);
+
     public Task<LeaveRequestDecision?> GetDecisionByOperationIdAsync(Guid operationId, CancellationToken cancellationToken) =>
         dbContext.LeaveRequestDecisions.AsNoTracking().FirstOrDefaultAsync(x => x.OperationId == operationId, cancellationToken);
 

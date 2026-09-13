@@ -9,7 +9,7 @@ type DevelopmentActor = { id: string; displayName: string; email: string; primar
 type LeaveType = { id: string; code: string; name: string; description: string | null; isActive: boolean; sortOrder: number };
 type BalanceBucket = { id: string; code: string; name: string; description: string | null; unit: string; isActive: boolean };
 type LeavePolicy = { id: string; leaveTypeId: string; leaveTypeCode: string; leaveTypeName: string; orgUnitId: string | null; orgUnitCode: string | null; orgUnitName: string | null; appliesToDescendants: boolean; isActive: boolean };
-type LeavePolicyVersion = { id: string; leavePolicyId: string; versionNumber: number; status: string; effectiveFrom: string; effectiveTo: string | null; dayCountMode: string; allowHalfDay: boolean; minimumNoticeDays: number | null; noticeDayCountMode: string; maximumRequestDays: number | null; overlapBehavior: string; consumesBalance: boolean; balanceBucketId: string | null; balanceBucketCode: string | null; balanceBucketName: string | null; workingCalendarId: string | null; workingCalendarCode: string | null; workingCalendarName: string | null };
+type LeavePolicyVersion = { id: string; leavePolicyId: string; versionNumber: number; status: string; effectiveFrom: string; effectiveTo: string | null; dayCountMode: string; allowHalfDay: boolean; minimumNoticeDays: number | null; noticeDayCountMode: string; maximumRequestDays: number | null; requiredDocumentKind: string | null; overlapBehavior: string; consumesBalance: boolean; balanceBucketId: string | null; balanceBucketCode: string | null; balanceBucketName: string | null; workingCalendarId: string | null; workingCalendarCode: string | null; workingCalendarName: string | null };
 type ResolvePolicyResult = { found: boolean; policy: LeavePolicy | null; version: LeavePolicyVersion | null; reason: string | null };
 type WorkingCalendarWeekday = { dayOfWeek: string; isWorkingDay: boolean };
 type WorkingCalendarException = { id: string; workingCalendarId: string; date: string; name: string; isWorkingDay: boolean };
@@ -29,7 +29,7 @@ type AuditFilters = { action: string; resourceType: string; fromUtc: string; toU
 type Role = { id: string; code: string; name: string; description: string; isActive: boolean };
 type UserOrgAssignment = { id: string; userId: string; orgUnitId: string; orgUnitName: string; isPrimary: boolean; effectiveFromUtc: string; effectiveToUtc: string | null };
 type RoleScopeAssignment = { id: string; userId: string; roleId: string; roleCode: string; orgUnitId: string; includeDescendants: boolean; effectiveFromUtc: string; effectiveToUtc: string | null };
-type ApiErrorPayload = { error?: string; title?: string; detail?: string; code?: string; minimumNoticeDays?: number; calculatedNoticeDays?: number | null; noticeDayCountMode?: string; businessToday?: string | null; startDate?: string | null; maximumRequestDays?: number; calculatedDays?: number; dayCountMode?: string };
+type ApiErrorPayload = { error?: string; title?: string; detail?: string; code?: string; minimumNoticeDays?: number; calculatedNoticeDays?: number | null; noticeDayCountMode?: string; businessToday?: string | null; startDate?: string | null; maximumRequestDays?: number; calculatedDays?: number; dayCountMode?: string; requiredDocumentKind?: string | null };
 
 type StatusCardProps = { label: string; status: HealthStatus };
 type CatalogKind = 'leave-types' | 'balance-buckets';
@@ -38,6 +38,7 @@ const weekdayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'F
 const endpointPrefix = '/api';
 const selectedActorStorageKey = 'licenses.devActorId';
 const isDevelopment = import.meta.env.DEV;
+const documentKindOptions = [{ value: '', label: 'None' }, { value: 'MEDICAL_CERTIFICATE', label: 'Medical certificate' }];
 
 function developmentHeaders(actorId: string | null): HeadersInit {
   return isDevelopment && actorId ? { 'X-Dev-User-Id': actorId } : {};
@@ -61,6 +62,11 @@ async function fetchHealth(path: string): Promise<HealthStatus> {
 }
 
 function formatApiError(payload: ApiErrorPayload, fallback: string): string {
+  if (payload.code === 'REQUIRED_DOCUMENT_MISSING') {
+    const kind = formatDocumentKind(payload.requiredDocumentKind);
+    return `This request requires ${kind.toLowerCase()} before it can be submitted.`;
+  }
+
   if (payload.code === 'MAXIMUM_REQUEST_DAYS_EXCEEDED' && typeof payload.maximumRequestDays === 'number' && typeof payload.calculatedDays === 'number') {
     const mode = payload.dayCountMode === 'BUSINESS_DAYS' ? 'business' : 'calendar';
     const maximumUnit = payload.maximumRequestDays === 1 ? `${mode} day` : `${mode} days`;
@@ -82,6 +88,12 @@ function formatApiError(payload: ApiErrorPayload, fallback: string): string {
   }
 
   return payload.error ?? payload.detail ?? payload.title ?? fallback;
+}
+
+function formatDocumentKind(kind: string | null | undefined): string {
+  if (kind === 'MEDICAL_CERTIFICATE') return 'Medical certificate';
+  if (!kind) return 'None';
+  return kind.toLowerCase().split('_').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
 }
 
 async function readApiFailure(response: Response): Promise<ApiError> {
@@ -170,6 +182,7 @@ function versionPayloadFromForm(data: FormData) {
     minimumNoticeDays: data.get('minimumNoticeDays') === '' ? null : Number(data.get('minimumNoticeDays')),
     noticeDayCountMode: data.get('noticeDayCountMode'),
     maximumRequestDays: data.get('maximumRequestDays') === '' ? null : Number(data.get('maximumRequestDays')),
+    requiredDocumentKind: data.get('requiredDocumentKind') || null,
     overlapBehavior: data.get('overlapBehavior'),
     consumesBalance,
     balanceBucketId: consumesBalance ? data.get('balanceBucketId') || null : null,
@@ -239,6 +252,7 @@ export function App() {
   const [isRequestMessageError, setIsRequestMessageError] = useState(false);
   const [isRequestSubmitting, setIsRequestSubmitting] = useState(false);
   const [uploadingDocumentRequestId, setUploadingDocumentRequestId] = useState<string | null>(null);
+  const [manualDraftRequest, setManualDraftRequest] = useState<LeaveRequest | null>(null);
   const [auditEvents, setAuditEvents] = useState<AuditEventListResult | null>(null);
   const [auditFilters, setAuditFilters] = useState<AuditFilters>({ action: '', resourceType: '', fromUtc: '', toUtc: '', page: 1, pageSize: 25 });
   const [auditMessage, setAuditMessage] = useState<string | null>(null);
@@ -889,7 +903,7 @@ export function App() {
 
 
 
-  async function uploadMedicalCertificate(event: FormEvent<HTMLFormElement>, requestId: string) {
+  async function uploadMedicalCertificate(event: FormEvent<HTMLFormElement>, requestId: string, options?: { forOtherDraft?: boolean }) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const file = data.get('file');
@@ -901,9 +915,14 @@ export function App() {
       setUploadingDocumentRequestId(requestId);
       const payload = new FormData();
       payload.append('file', file);
-      await sendMultipart<LeaveRequestDocument>(`/leave-requests/${requestId}/documents`, payload, selectedActorId);
+      const uploaded = await sendMultipart<LeaveRequestDocument>(`/leave-requests/${requestId}/documents`, payload, selectedActorId);
       event.currentTarget.reset();
       await loadLeaveRequests(selectedActorId);
+      if (options?.forOtherDraft) {
+        setManualDraftRequest((current) => current?.id === requestId
+          ? { ...current, documents: [...current.documents.filter((document) => document.id !== uploaded.id), uploaded] }
+          : current);
+      }
       setIsRequestMessageError(false);
       setRequestMessage('Medical certificate uploaded.');
     } catch (error) {
@@ -1019,15 +1038,32 @@ export function App() {
     const data = new FormData(event.currentTarget);
     const userId = String(data.get('userId') ?? '');
     try {
-      const result = await sendJson<SubmitLeaveRequestResult>(`/users/${userId}/leave-requests`, 'POST', { orgUnitId: data.get('orgUnitId'), leaveTypeId: data.get('leaveTypeId'), startDate: data.get('startDate'), endDate: data.get('endDate'), dayPortion: data.get('dayPortion'), comment: data.get('comment') || null, submissionOperationId: crypto.randomUUID() }, selectedActorId);
+      const draft = await sendJson<LeaveRequest>(`/users/${userId}/leave-requests/drafts`, 'POST', { orgUnitId: data.get('orgUnitId'), leaveTypeId: data.get('leaveTypeId'), startDate: data.get('startDate'), endDate: data.get('endDate'), dayPortion: data.get('dayPortion'), comment: data.get('comment') || null }, selectedActorId);
       event.currentTarget.reset();
+      setManualDraftRequest(draft);
       await loadLeaveRequests(selectedActorId);
-      await loadMyBalances(selectedActorId);
       setIsRequestMessageError(false);
-      setRequestMessage(`Manual request created as ${result.request.status}.`);
+      setRequestMessage(`Manual draft created for ${draft.userDisplayName ?? 'employee'}. Upload a supporting document if required, then submit.`);
     } catch (error) {
       setIsRequestMessageError(true);
       setRequestMessage(error instanceof Error ? error.message : 'Unable to create request for employee.');
+    }
+  }
+
+  async function submitLeaveRequestForUser(requestId: string) {
+    setIsRequestSubmitting(true);
+    try {
+      const result = await sendJson<SubmitLeaveRequestResult>(`/leave-requests/${requestId}/submit-for-other`, 'POST', {}, selectedActorId);
+      setManualDraftRequest(result.request);
+      await loadLeaveRequests(selectedActorId);
+      await loadMyBalances(selectedActorId);
+      setIsRequestMessageError(false);
+      setRequestMessage(`Manual request submitted as ${result.request.status}.`);
+    } catch (error) {
+      setIsRequestMessageError(true);
+      setRequestMessage(error instanceof Error ? error.message : 'Unable to submit request for employee.');
+    } finally {
+      setIsRequestSubmitting(false);
     }
   }
 
@@ -1300,7 +1336,7 @@ export function App() {
           <button type="submit">Create draft</button>
         </form>
         <form className="panel-card catalog-form" onSubmit={createLeaveRequestForUser}>
-          <h3>Create request for employee</h3>
+          <h3>Create draft for employee</h3>
           <select name="userId" required><option value="">Select employee</option>{users.filter((user) => user.isActive).map((user) => <option key={user.id} value={user.id}>{user.displayName}</option>)}</select>
           <select name="leaveTypeId" required><option value="">Select leave type</option>{leaveTypes.filter((type) => type.isActive).map((type) => <option key={type.id} value={type.id}>{type.code} - {type.name}</option>)}</select>
           <select name="orgUnitId" required><option value="">Select org unit</option>{flattenOrgUnits(orgTree).filter((unit) => unit.isActive).map((unit) => <option key={unit.id} value={unit.id}>{unit.code} - {unit.name}</option>)}</select>
@@ -1308,8 +1344,35 @@ export function App() {
           <input name="endDate" type="date" required />
           <select name="dayPortion" defaultValue="FULL_DAY"><option>FULL_DAY</option><option>HALF_DAY</option></select>
           <input name="comment" placeholder="Comment" />
-          <button type="submit">Create and submit</button>
+          <button type="submit">Create draft</button>
         </form>
+        {manualDraftRequest ? <article className="panel-card">
+          <h3>Manual draft for employee</h3>
+          <div className="version-row">
+            <strong>{manualDraftRequest.userDisplayName ?? manualDraftRequest.userId}</strong>
+            <span>{manualDraftRequest.leaveTypeName ?? manualDraftRequest.leaveTypeCode ?? manualDraftRequest.leaveTypeId}</span>
+            <span>{manualDraftRequest.startDate}  {manualDraftRequest.endDate} ú {manualDraftRequest.dayPortion}</span>
+            <span className={`badge ${statusBadgeClass(manualDraftRequest.status)}`}>{manualDraftRequest.status}</span>
+            <span>Created by: {manualDraftRequest.createdByUserDisplayName ?? manualDraftRequest.createdByUserId}</span>
+          </div>
+          <div className="document-list">
+            <strong>Supporting documents</strong>
+            {manualDraftRequest.documents.length === 0
+              ? <span className="muted">No documents attached yet. Upload here before submitting when the policy requires one.</span>
+              : manualDraftRequest.documents.map((document) => (
+                <span className="catalog-row" key={document.id}>
+                  <span>{formatDocumentKind(document.kind)}</span><span>{document.originalFileName}</span><span>{Math.ceil(document.sizeBytes / 1024)} KB</span>
+                </span>
+              ))}
+          </div>
+          {manualDraftRequest.status === 'DRAFT' ? <>
+            <form className="catalog-form inline-form" onSubmit={(event) => uploadMedicalCertificate(event, manualDraftRequest.id, { forOtherDraft: true })}>
+              <input name="file" type="file" accept="application/pdf,image/jpeg,image/png" required />
+              <button type="submit" disabled={uploadingDocumentRequestId === manualDraftRequest.id}>Upload medical certificate</button>
+            </form>
+            <button type="button" disabled={isRequestSubmitting} onClick={() => submitLeaveRequestForUser(manualDraftRequest.id)}>Submit for employee</button>
+          </> : <p className="muted">Current status: {manualDraftRequest.status}</p>}
+        </article> : null}
         <article className="panel-card"><h3>My requests</h3>{myRequests.length === 0 ? <p className="muted">No leave requests yet.</p> : null}<div className="catalog-list">
           {myRequests.map((request) => <div className="policy-card" key={request.id}>
             <strong>{request.leaveTypeCode ?? request.leaveTypeId} <span className={`badge ${statusBadgeClass(request.status)}`}>{request.status}</span></strong>
@@ -1326,10 +1389,11 @@ export function App() {
               <strong>Documents</strong>
               {request.documents.length === 0 ? <span className="muted">No documents attached.</span> : request.documents.map((document) => (
                 <button type="button" className="catalog-row" key={document.id} onClick={() => void downloadLeaveRequestDocument(document)}>
-                  <span>{document.kind}</span><span>{document.originalFileName}</span><span>{Math.ceil(document.sizeBytes / 1024)} KB</span>
+                  <span>{formatDocumentKind(document.kind)}</span><span>{document.originalFileName}</span><span>{Math.ceil(document.sizeBytes / 1024)} KB</span>
                 </button>
               ))}
             </div>
+            {request.status === 'DRAFT' ? <p className="muted">Supporting documents can be uploaded before submission. If the policy requires one, submission will stay blocked until it is attached.</p> : null}
             {request.status !== 'COMPLETED' ? <form className="catalog-form inline-form" onSubmit={(event) => uploadMedicalCertificate(event, request.id)}>
               <input name="file" type="file" accept="application/pdf,image/jpeg,image/png" required />
               <button type="submit" disabled={uploadingDocumentRequestId === request.id}>Upload medical certificate</button>
@@ -1497,6 +1561,11 @@ export function App() {
               {calendars.filter((calendar) => calendar.isActive).map((calendar) => <option key={calendar.id} value={calendar.id}>{calendar.code}</option>)}
             </select>
             <input name="maximumRequestDays" type="number" min="0.5" step="0.5" placeholder="Maximum request days" />
+            <label>Required document
+              <select name="requiredDocumentKind" defaultValue="">
+                {documentKindOptions.map((option) => <option key={option.value || 'none'} value={option.value}>{option.label}</option>)}
+              </select>
+            </label>
             <select name="overlapBehavior" defaultValue="BLOCK"><option>BLOCK</option><option>WARN</option><option>ALLOW</option></select>
             <label><input name="consumesBalance" type="checkbox" /> Consumes balance</label>
             <select name="balanceBucketId">
@@ -1517,7 +1586,7 @@ export function App() {
                   <div className="version-row" key={version.id}>
                     <span className={`badge ${version.status.toLowerCase()}`}>{version.status}</span>
                     <span>v{version.versionNumber}: {version.effectiveFrom} → {version.effectiveTo ?? 'open'}</span>
-                    <span>{version.dayCountMode}, calendar: {version.workingCalendarCode ?? 'none'}, half day: {version.allowHalfDay ? 'yes' : 'no'}, notice: {version.minimumNoticeDays ?? 'none'} {version.noticeDayCountMode}, max: {version.maximumRequestDays ?? 'none'}, overlap: {version.overlapBehavior}, balance: {version.consumesBalance ? version.balanceBucketCode : 'no'}</span>
+                    <span>{version.dayCountMode}, calendar: {version.workingCalendarCode ?? 'none'}, half day: {version.allowHalfDay ? 'yes' : 'no'}, notice: {version.minimumNoticeDays ?? 'none'} {version.noticeDayCountMode}, max: {version.maximumRequestDays ?? 'none'}, required document: {formatDocumentKind(version.requiredDocumentKind)}, overlap: {version.overlapBehavior}, balance: {version.consumesBalance ? version.balanceBucketCode : 'no'}</span>
                     {version.status === 'DRAFT' ? (
                       <>
                         <details>
@@ -1534,6 +1603,11 @@ export function App() {
                               {calendars.filter((calendar) => calendar.isActive || calendar.id === version.workingCalendarId).map((calendar) => <option key={calendar.id} value={calendar.id}>{calendar.code}</option>)}
                             </select>
                             <input name="maximumRequestDays" type="number" min="0.5" step="0.5" placeholder="Maximum request days" defaultValue={version.maximumRequestDays ?? ''} />
+                            <label>Required document
+                              <select name="requiredDocumentKind" defaultValue={version.requiredDocumentKind ?? ''}>
+                                {documentKindOptions.map((option) => <option key={option.value || 'none'} value={option.value}>{option.label}</option>)}
+                              </select>
+                            </label>
                             <select name="overlapBehavior" defaultValue={version.overlapBehavior}><option>BLOCK</option><option>WARN</option><option>ALLOW</option></select>
                             <label><input name="consumesBalance" type="checkbox" defaultChecked={version.consumesBalance} /> Consumes balance</label>
                             <select name="balanceBucketId" defaultValue={version.balanceBucketId ?? ''}>
@@ -1564,7 +1638,7 @@ export function App() {
           </select>
           <input name="date" type="date" required defaultValue="2026-01-01" />
           <button type="submit">Resolve</button>
-          {resolvedPolicy ? <p className="muted">{resolvedPolicy.found ? `Resolved ${resolvedPolicy.policy?.leaveTypeCode} ${resolvedPolicy.policy?.orgUnitCode ?? 'COMPANY'} v${resolvedPolicy.version?.versionNumber}` : resolvedPolicy.reason}</p> : null}
+          {resolvedPolicy ? <p className="muted">{resolvedPolicy.found ? `Resolved ${resolvedPolicy.policy?.leaveTypeCode} ${resolvedPolicy.policy?.orgUnitCode ?? 'COMPANY'} v${resolvedPolicy.version?.versionNumber}; required document: ${formatDocumentKind(resolvedPolicy.version?.requiredDocumentKind)}` : resolvedPolicy.reason}</p> : null}
         </form>
       </section>
 

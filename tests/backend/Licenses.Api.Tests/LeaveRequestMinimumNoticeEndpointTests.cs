@@ -105,6 +105,26 @@ public sealed class LeaveRequestMinimumNoticeEndpointTests(WebApplicationFactory
         Assert.Empty(setup.Outbox.Messages);
     }
 
+    [Fact]
+    public async Task SelfSubmitMissingRequiredDocumentReturnsSafeBusinessValidation()
+    {
+        var setup = TestSetup.Create(minimumNoticeDays: 0, startDate: new DateOnly(2026, 10, 1), requiredDocumentKind: LeaveRequestDocumentKind.MedicalCertificate);
+        using var client = CreateClient(setup, setup.Employee.Id, PermissionCodes.LeaveRequestsCreateSelf);
+
+        using var response = await client.PostAsync($"/api/leave-requests/{setup.Request.Id}/submit", null);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("REQUIRED_DOCUMENT_MISSING", body);
+        Assert.Contains("requiredDocumentKind", body);
+        Assert.Contains("MEDICAL_CERTIFICATE", body);
+        Assert.DoesNotContain("storage", body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("sha256", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(LeaveRequestStatus.Draft, setup.Request.Status);
+        Assert.Empty(setup.Outbox.Messages);
+        Assert.Empty(setup.Audit.Events);
+    }
+
     private HttpClient CreateClient(TestSetup setup, Guid actorId, params string[] permissions) => factory.WithWebHostBuilder(builder =>
     {
         builder.UseEnvironment("Testing");
@@ -124,14 +144,14 @@ public sealed class LeaveRequestMinimumNoticeEndpointTests(WebApplicationFactory
 
     private sealed record TestSetup(User Employee, User Approver, OrgUnit Unit, LeaveType Type, LeavePolicy Policy, LeavePolicyVersion Version, LeaveRequest Request, FakeLeaveRequestRepository Requests, FakeApplicationEventOutbox Outbox, FakeAuditWriter Audit)
     {
-        public static TestSetup Create(int minimumNoticeDays, DateOnly startDate, DateOnly? endDate = null, decimal? maximumRequestDays = null)
+        public static TestSetup Create(int minimumNoticeDays, DateOnly startDate, DateOnly? endDate = null, decimal? maximumRequestDays = null, LeaveRequestDocumentKind? requiredDocumentKind = null)
         {
             var employee = User.Create("Employee", $"employee.{Guid.NewGuid():N}@example.test", null, Now);
             var approver = User.Create("Approver", $"approver.{Guid.NewGuid():N}@example.test", null, Now);
             var unit = OrgUnit.Create("Engineering", "ENG" + Guid.NewGuid().ToString("N")[..8], null, Now);
             var type = LeaveType.Create("VAC" + Guid.NewGuid().ToString("N")[..8], "Vacation", null, 1, true, Now);
             var policy = LeavePolicy.Create(type.Id, null, false, true, Now);
-            var version = LeavePolicyVersion.CreateDraft(policy.Id, 1, new DateOnly(2026, 1, 1), null, PolicyDayCountMode.CalendarDays, true, minimumNoticeDays, PolicyDayCountMode.CalendarDays, maximumRequestDays, PolicyOverlapBehavior.Block, false, null, null, Now);
+            var version = LeavePolicyVersion.CreateDraft(policy.Id, 1, new DateOnly(2026, 1, 1), null, PolicyDayCountMode.CalendarDays, true, minimumNoticeDays, PolicyDayCountMode.CalendarDays, maximumRequestDays, PolicyOverlapBehavior.Block, false, null, null, Now, requiredDocumentKind);
             version.Publish(Now);
             var request = LeaveRequest.CreateDraft(employee.Id, unit.Id, type.Id, startDate, endDate ?? startDate, LeaveRequestDayPortion.FullDay, "Draft", employee.Id, Now);
             var setup = new TestSetup(employee, approver, unit, type, policy, version, request, null!, new FakeApplicationEventOutbox(), new FakeAuditWriter());
@@ -153,6 +173,7 @@ public sealed class LeaveRequestMinimumNoticeEndpointTests(WebApplicationFactory
         public Task<LeaveRequestDocument?> GetDocumentAsync(Guid id, bool tracking, CancellationToken ct) => Task.FromResult<LeaveRequestDocument?>(null);
         public Task<IReadOnlyList<LeaveRequestDocument>> ListDocumentsByRequestIdAsync(Guid requestId, CancellationToken ct) => Task.FromResult<IReadOnlyList<LeaveRequestDocument>>([]);
         public Task<IReadOnlyList<LeaveRequestDocument>> ListDocumentsByRequestIdsAsync(IReadOnlyCollection<Guid> ids, CancellationToken ct) => Task.FromResult<IReadOnlyList<LeaveRequestDocument>>([]);
+        public Task<bool> HasDocumentOfKindAsync(Guid requestId, LeaveRequestDocumentKind kind, CancellationToken ct) => Task.FromResult(false);
         public Task AddDocumentAsync(LeaveRequestDocument document, CancellationToken ct) => Task.CompletedTask;
         public Task<LeaveRequestDecision?> GetDecisionByOperationIdAsync(Guid operationId, CancellationToken ct) => Task.FromResult<LeaveRequestDecision?>(null);
         public Task<LeaveRequestDecision?> GetDecisionByRequestIdAsync(Guid requestId, CancellationToken ct) => Task.FromResult<LeaveRequestDecision?>(null);
