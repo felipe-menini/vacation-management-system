@@ -41,6 +41,7 @@ public sealed class LeaveRequestConfiguration : IEntityTypeConfiguration<LeaveRe
         builder.HasOne<BalanceAccount>().WithMany().HasForeignKey(x => x.BalanceAccountId).OnDelete(DeleteBehavior.Restrict);
         builder.HasIndex(x => new { x.UserId, x.StartDate, x.EndDate, x.Status });
         builder.HasIndex(x => new { x.OrgUnitId, x.Status });
+        builder.HasIndex(x => new { x.OrgUnitId, x.Status, x.StartDate, x.EndDate });
         builder.HasIndex(x => new { x.Status, x.EndDate, x.Id });
         builder.HasIndex(x => x.LeaveTypeId);
         builder.HasIndex(x => x.LeavePolicyVersionId);

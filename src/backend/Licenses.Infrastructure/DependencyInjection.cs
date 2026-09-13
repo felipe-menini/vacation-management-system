@@ -48,6 +48,7 @@ public static class DependencyInjection
         });
         services.AddScoped<IPrivateDocumentStorage, LocalPrivateDocumentStorage>();
         services.AddScoped<ILeaveRequestRepository, EfLeaveRequestRepository>();
+        services.AddScoped<ILeaveCalendarReader, EfLeaveCalendarReader>();
         services.AddScoped<IApplicationEventOutbox, EfApplicationEventOutbox>();
         services.AddScoped<IAuditWriter, EfAuditWriter>();
         services.AddScoped<IAuditEventReader, EfAuditEventReader>();
