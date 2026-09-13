@@ -22,6 +22,7 @@ The API is the authoritative boundary for authentication, authorization, validat
 | Policies | `GET /leave-types`, `POST /leave-types`, `GET /policies`, `POST /policies`, `POST /policies/{id}/publish` |
 | Documents | `POST /leave-requests/{id}/attachments`, `GET /attachments/{id}/content` |
 | Audit | `GET /audit-events` |
+| Reports | `GET /reports/leave-summary` |
 | Migration | `POST /migration/sharepoint/jobs`, `GET /migration/jobs/{id}` |
 
 These are orientation-level endpoints from the proposal, not final API contracts.
@@ -96,3 +97,8 @@ Uploads use `multipart/form-data` with a `file` part. Content is streamed only b
 Policy version DTOs and create/update commands include nullable `requiredDocumentKind`. Submission endpoints return `400` with code `REQUIRED_DOCUMENT_MISSING` and safe `requiredDocumentKind` when the resolved policy version requires a missing document. The failed response exposes no storage key, file bytes, or storage URL.
 
 Manual create-for-other now has a draft-capable endpoint, `POST /api/users/{userId}/leave-requests/drafts`, followed by existing private document upload and `POST /api/leave-requests/{id}/submit-for-other`. The compatibility atomic endpoint remains available and uses the same submission rules.
+
+
+## Implemented EP-19 reporting endpoint
+
+EP-19 adds `GET /api/reports/leave-summary?from=YYYY-MM-DD&to=YYYY-MM-DD[&orgUnitId=...]`. The endpoint is protected by `leave.reports.read`, applies backend Role + Permission + Organizational Scope filtering, validates `from <= to`, bounds the inclusive range to 366 days, and returns only aggregate current-workload, selected-period, and org-unit breakdown data. It does not expose employee rows, individual request rows, leave-type details, medical indicators, document metadata, comments, reasons, balances, or audit records.

@@ -30,6 +30,7 @@ Permissions are determined by Role + Organizational Scope. See [authorization.md
 | Configure types/policies | No | No | No | Yes | Technical support without functional decision |
 | Configure units/scopes | No | No | No | Yes/delegated | Technical setup |
 | View audit | Own limited audit | In scope | In scope | Yes | Technical audit |
+| View aggregate leave reports | No | Configurable | In scope + descendants | Yes | No by default |
 
 Manual creation, revocation, and balance adjustment require mandatory reason and audit.
 
@@ -150,3 +151,14 @@ EP-18 adds:
 | `leave.calendar.read` | Read privacy-minimized team leave calendar entries inside authorized organizational scope. |
 
 Development seed grants `leave.calendar.read` to Supervisor, Manager, and HR. Employee and Technical Administrator receive no automatic team leave calendar access. Scope is evaluated against the leave request's stored `OrgUnitId`, including the assigned IncludeDescendants behavior where configured. The calendar intentionally hides leave type, reasons/comments, cancellation/decision reasons, document metadata, medical indicators, and balance details.
+
+
+## Implemented leave reporting permission
+
+EP-19 adds:
+
+| Permission | Description |
+| --- | --- |
+| `leave.reports.read` | Read privacy-minimized aggregate leave reports inside authorized organizational scope. |
+
+Development seed grants `leave.reports.read` to Manager and HR. Employee and Technical Administrator receive no automatic report access. Reporting scope is evaluated against each leave request's stored `OrgUnitId` and reuses IncludeDescendants behavior where configured. Reports intentionally expose aggregates only: no employee rows, request rows, leave-type analytics, medical indicators, document metadata, comments, reasons, balances, audit records, percentages, or fabricated total-day metrics.

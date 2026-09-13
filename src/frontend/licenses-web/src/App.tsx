@@ -24,11 +24,16 @@ type LeaveRequestDocument = { id: string; leaveRequestId: string; kind: string; 
 type LeaveRequest = { id: string; userId: string; userDisplayName: string | null; orgUnitId: string; orgUnitCode: string | null; orgUnitName: string | null; leaveTypeId: string; leaveTypeCode: string | null; leaveTypeName: string | null; leavePolicyVersionId: string | null; startDate: string; endDate: string; dayPortion: string; calculatedDays: number | null; status: string; comment: string | null; balanceAccountId: string | null; balanceReservationOperationId: string | null; submissionOperationId: string | null; createdByUserId: string; createdByUserDisplayName: string | null; createdAtUtc: string; submittedAtUtc: string | null; decidedAtUtc: string | null; cancellationRequestedAtUtc: string | null; cancellationDecidedAtUtc: string | null; revokedAtUtc: string | null; completedAtUtc: string | null; decision: LeaveRequestDecision | null; cancellation: LeaveRequestCancellation | null; revocation: LeaveRequestRevocation | null; documents: LeaveRequestDocument[] };
 type LeaveCalendarEntry = { leaveRequestId: string; subjectUserId: string; subjectDisplayName: string | null; orgUnitId: string; orgUnitName: string | null; startDate: string; endDate: string; dayPortion: string; status: string };
 type LeaveCalendarPage = { page: number; pageSize: number; totalCount: number; items: LeaveCalendarEntry[] };
+type LeaveSummaryReport = { from: string; to: string; orgUnitId: string | null; currentWorkload: LeaveReportCurrentWorkload; period: LeaveReportPeriod; orgUnitBreakdown: LeaveReportOrgUnitBreakdown[] };
+type LeaveReportCurrentWorkload = { pendingApprovalCount: number; cancellationRequestedCount: number };
+type LeaveReportPeriod = { approvedAbsenceCount: number; completedAbsenceCount: number; cancellationRequestedAbsenceCount: number; approvedOrEffectiveAbsenceCount: number; uniqueEmployeesWithApprovedOrCompletedAbsence: number };
+type LeaveReportOrgUnitBreakdown = { orgUnitId: string; orgUnitName: string | null; approvedOrEffectiveAbsenceCount: number; uniqueEmployeeCount: number };
 type SubmitLeaveRequestResult = { request: LeaveRequest; warnings: string[]; wasAlreadySubmitted: boolean };
 type AuditEvent = { id: string; occurredAtUtc: string; action: string; resourceType: string; resourceId: string | null; actorUserId: string | null; actorDisplayName: string | null; subjectUserId: string | null; subjectDisplayName: string | null; orgUnitId: string | null; orgUnitName: string | null; correlationId: string | null; metadataJson: string | null };
 type AuditEventListResult = { items: AuditEvent[]; page: number; pageSize: number; totalCount: number; hasNextPage: boolean };
 type AuditFilters = { action: string; resourceType: string; fromUtc: string; toUtc: string; page: number; pageSize: number };
 type LeaveCalendarFilters = { monthDate: Date; orgUnitId: string; page: number; pageSize: number };
+type LeaveReportFilters = { from: string; to: string; orgUnitId: string };
 type Role = { id: string; code: string; name: string; description: string; isActive: boolean };
 type UserOrgAssignment = { id: string; userId: string; orgUnitId: string; orgUnitName: string; isPrimary: boolean; effectiveFromUtc: string; effectiveToUtc: string | null };
 type RoleScopeAssignment = { id: string; userId: string; roleId: string; roleCode: string; orgUnitId: string; includeDescendants: boolean; effectiveFromUtc: string; effectiveToUtc: string | null };
@@ -178,6 +183,11 @@ function addMonths(value: Date, months: number): Date {
 
 function getMonthRange(value: Date): { from: string; to: string } {
   return { from: toDateOnly(startOfMonth(value)), to: toDateOnly(endOfMonth(value)) };
+}
+
+function getCurrentMonthReportFilters(): LeaveReportFilters {
+  const range = getMonthRange(new Date());
+  return { from: range.from, to: range.to, orgUnitId: '' };
 }
 
 function formatMonth(value: Date): string {
@@ -347,6 +357,12 @@ export function App() {
   const [teamCalendarForbidden, setTeamCalendarForbidden] = useState(false);
   const [isTeamCalendarLoading, setIsTeamCalendarLoading] = useState(false);
   const [canReadTeamCalendar, setCanReadTeamCalendar] = useState(false);
+  const [leaveReport, setLeaveReport] = useState<LeaveSummaryReport | null>(null);
+  const [reportFilters, setReportFilters] = useState<LeaveReportFilters>(() => getCurrentMonthReportFilters());
+  const [reportMessage, setReportMessage] = useState<string | null>(null);
+  const [reportForbidden, setReportForbidden] = useState(false);
+  const [isReportLoading, setIsReportLoading] = useState(false);
+  const [canReadReports, setCanReadReports] = useState(false);
   const [selectedAdminUserId, setSelectedAdminUserId] = useState<string>('');
   const [roles, setRoles] = useState<Role[]>([]);
   const [orgAssignments, setOrgAssignments] = useState<UserOrgAssignment[]>([]);
@@ -360,6 +376,7 @@ export function App() {
   const selectedAdminUserIsActor = selectedActorId !== null && selectedAdminUser?.id === selectedActorId;
   const visibleOrgUnits = useMemo(() => flattenOrgUnits(orgTree).filter((unit) => unit.isActive), [orgTree]);
   const teamCalendarRange = useMemo(() => getMonthRange(teamCalendarFilters.monthDate), [teamCalendarFilters.monthDate]);
+  const reportPeriodLabel = useMemo(() => `${formatDateOnly(reportFilters.from)} to ${formatDateOnly(reportFilters.to)}`, [reportFilters.from, reportFilters.to]);
 
   async function loadCatalog(actorId: string | null) {
     const [types, buckets] = await Promise.all([
@@ -431,6 +448,50 @@ export function App() {
       setIsTeamCalendarLoading(false);
     }
   }, [teamCalendarFilters]);
+
+  const loadLeaveReport = useCallback(async (actorId: string | null, filters: LeaveReportFilters = reportFilters) => {
+    if (filters.to < filters.from) {
+      setLeaveReport(null);
+      setReportForbidden(false);
+      setReportMessage('The report start date must be on or before the end date.');
+      return;
+    }
+
+    if (daysBetweenInclusive(filters.from, filters.to) > 366) {
+      setLeaveReport(null);
+      setReportForbidden(false);
+      setReportMessage('Report range cannot exceed 366 days.');
+      return;
+    }
+
+    const params = new URLSearchParams({ from: filters.from, to: filters.to });
+    if (filters.orgUnitId) params.set('orgUnitId', filters.orgUnitId);
+
+    setIsReportLoading(true);
+    try {
+      const result = await fetchJson<LeaveSummaryReport>(`/reports/leave-summary?${params.toString()}`, actorId);
+      setLeaveReport(result);
+      setCanReadReports(true);
+      setReportForbidden(false);
+      setReportMessage(null);
+    } catch (error) {
+      setLeaveReport(null);
+      if (error instanceof ApiError && error.status === 401) {
+        setCanReadReports(false);
+        setReportForbidden(false);
+        setReportMessage('Sign in to view leave reports.');
+      } else if (error instanceof ApiError && error.status === 403) {
+        if (!filters.orgUnitId) setCanReadReports(false);
+        setReportForbidden(true);
+        setReportMessage('You do not have permission to view leave reports.');
+      } else {
+        setReportForbidden(false);
+        setReportMessage(error instanceof Error ? error.message : 'Unable to load leave reports.');
+      }
+    } finally {
+      setIsReportLoading(false);
+    }
+  }, [reportFilters]);
 
   async function loadLeaveRequests(actorId: string | null) {
     setMyRequests(await fetchJson<LeaveRequest[]>('/leave-requests/me', actorId));
@@ -631,6 +692,14 @@ export function App() {
 
     void loadCalendarForActor();
   }, [loadTeamCalendar, selectedActorId]);
+
+  useEffect(() => {
+    async function loadReportForActor() {
+      await loadLeaveReport(selectedActorId);
+    }
+
+    void loadReportForActor();
+  }, [loadLeaveReport, selectedActorId]);
 
 
   function changeSelectedActor(actorId: string) {
@@ -1051,6 +1120,30 @@ export function App() {
   }
 
 
+  async function changeReportPeriod(nextFilters: LeaveReportFilters) {
+    setReportFilters(nextFilters);
+    await loadLeaveReport(selectedActorId, nextFilters);
+  }
+
+  async function changeReportMonth(value: Date) {
+    const range = getMonthRange(value);
+    await changeReportPeriod({ ...reportFilters, from: range.from, to: range.to });
+  }
+
+  async function changeReportOrgUnit(orgUnitId: string) {
+    await changeReportPeriod({ ...reportFilters, orgUnitId });
+  }
+
+  async function applyReportDateRange(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    await changeReportPeriod({
+      ...reportFilters,
+      from: String(data.get('from') ?? reportFilters.from),
+      to: String(data.get('to') ?? reportFilters.to),
+    });
+  }
+
 
   async function uploadMedicalCertificate(event: FormEvent<HTMLFormElement>, requestId: string, options?: { forOtherDraft?: boolean }) {
     event.preventDefault();
@@ -1253,6 +1346,7 @@ export function App() {
       <nav className="page-nav" aria-label="Primary sections">
         <a href="#leave-requests">Leave requests</a>
         {canReadTeamCalendar ? <a href="#team-leave-calendar">Team calendar</a> : null}
+        {canReadReports ? <a href="#reports">Reports</a> : null}
         <a href="#balances">Balances</a>
       </nav>
 
@@ -1470,6 +1564,86 @@ export function App() {
           {dayCalculation ? <p className="muted">Calculated days: <strong>{dayCalculation.calculatedDays}</strong></p> : null}
         </form>
       </section>
+
+      {canReadReports ? <section className="admin-panel" id="reports" aria-label="Leave reports">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Reports</p>
+            <h2>HR / Management Dashboard</h2>
+            <p className="muted">Aggregate operational leave reporting. It does not show employees, leave types, reasons, medical indicators, documents, comments, balances, or request-level details.</p>
+          </div>
+          <button className="secondary-action" type="button" disabled={isReportLoading} onClick={() => void loadLeaveReport(selectedActorId)}>Refresh</button>
+        </div>
+        {reportMessage ? <p className={reportForbidden || reportMessage.includes('failed') || reportMessage.includes('permission') || reportMessage.includes('range') || reportMessage.includes('date') ? 'error' : 'muted'}>{reportMessage}</p> : null}
+        <div className="team-calendar-toolbar">
+          <div className="tabs" aria-label="Report month navigation">
+            <button type="button" onClick={() => changeReportMonth(addMonths(new Date(`${reportFilters.from}T00:00:00`), -1))}>Previous month</button>
+            <button type="button" onClick={() => changeReportMonth(new Date())}>Current month</button>
+            <button type="button" onClick={() => changeReportMonth(addMonths(new Date(`${reportFilters.from}T00:00:00`), 1))}>Next month</button>
+          </div>
+          {visibleOrgUnits.length > 0 ? <label className="actor-selector">
+            <span>Organization</span>
+            <select value={reportFilters.orgUnitId} onChange={(event) => changeReportOrgUnit(event.target.value)}>
+              <option value="">All authorized units</option>
+              {visibleOrgUnits.map((unit) => <option key={unit.id} value={unit.id}>{unit.code} - {unit.name}</option>)}
+            </select>
+          </label> : null}
+        </div>
+        <form className="panel-card report-period-form" onSubmit={applyReportDateRange}>
+          <label>From <input name="from" type="date" required defaultValue={reportFilters.from} /></label>
+          <label>To <input name="to" type="date" required defaultValue={reportFilters.to} /></label>
+          <button type="submit" disabled={isReportLoading}>Apply period</button>
+          <span className="muted">Maximum range: 366 days.</span>
+        </form>
+        {isReportLoading ? <p className="muted">Loading leave report...</p> : null}
+        {leaveReport ? <>
+          <section className="report-block current-workload" aria-label="Current workload">
+            <div>
+              <p className="eyebrow">Current workload</p>
+              <h3>Workflow backlog now</h3>
+              <p className="muted">These values are current-state workload counts. They are not limited by the selected period.</p>
+            </div>
+            <div className="metric-grid">
+              <article className="metric-card"><span>Pending approvals</span><strong>{leaveReport.currentWorkload.pendingApprovalCount}</strong></article>
+              <article className="metric-card"><span>Cancellation requests</span><strong>{leaveReport.currentWorkload.cancellationRequestedCount}</strong></article>
+            </div>
+          </section>
+
+          <section className="report-block selected-period" aria-label="Selected period metrics">
+            <div>
+              <p className="eyebrow">Selected period</p>
+              <h3>{reportPeriodLabel}</h3>
+              <p className="muted">Absence counts use the backend report overlap semantics for this period.</p>
+            </div>
+            <div className="metric-grid">
+              <article className="metric-card"><span>Approved absences</span><strong>{leaveReport.period.approvedAbsenceCount}</strong></article>
+              <article className="metric-card"><span>Completed absences</span><strong>{leaveReport.period.completedAbsenceCount}</strong></article>
+              <article className="metric-card"><span>Cancellation requested</span><strong>{leaveReport.period.cancellationRequestedAbsenceCount}</strong></article>
+              <article className="metric-card"><span>Effective absences</span><strong>{leaveReport.period.approvedOrEffectiveAbsenceCount}</strong></article>
+              <article className="metric-card"><span>Employees with approved/completed absence</span><strong>{leaveReport.period.uniqueEmployeesWithApprovedOrCompletedAbsence}</strong></article>
+            </div>
+          </section>
+
+          <section className="report-block" aria-label="Organization breakdown">
+            <div>
+              <p className="eyebrow">Organization breakdown</p>
+              <h3>Visible org units</h3>
+              <p className="muted">Aggregate counts only. Bars compare absence counts within this visible result set; they are not percentages.</p>
+            </div>
+            {leaveReport.orgUnitBreakdown.length === 0 ? <p className="muted">No organization activity for the selected period.</p> : <div className="org-breakdown-list">
+              {leaveReport.orgUnitBreakdown.map((row) => (
+                <article className="org-breakdown-row" key={row.orgUnitId}>
+                  <div>
+                    <strong>{row.orgUnitName ?? orgUnitLabel(orgTree, row.orgUnitId)}</strong>
+                    <span className="muted">Absences {row.approvedOrEffectiveAbsenceCount} · Employees {row.uniqueEmployeeCount}</span>
+                  </div>
+                  <div className="report-count-bar" aria-hidden="true">{'█'.repeat(Math.min(row.approvedOrEffectiveAbsenceCount, 24))}</div>
+                </article>
+              ))}
+            </div>}
+          </section>
+        </> : null}
+      </section> : null}
 
       {canReadTeamCalendar ? <section className="admin-panel" id="team-leave-calendar" aria-label="Team leave calendar">
         <div>
